@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>AR Preview</title>
+    <!-- 1. LOAD SCRIPT FROM CDN (MATCHING PWA for parity) -->
+    <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.3.0/model-viewer.min.js"
+        crossorigin="anonymous"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@600;700&display=swap');
+
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body,
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: transparent;
+            /* TRANSPARENT: Let Android View handle color */
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* 2. LAYER MODEL 3D */
+        #model-container {
+            position: absolute;
+            inset: 0;
+            z-index: 1;
+        }
+
+        model-viewer {
+            width: 100%;
+            height: 100%;
+            background-color: transparent;
+            /* PWA uses transparent */
+        }
+
+        /* 3. LAYER UI (UI Overlay) */
+        #ui-layer {
+            position: absolute;
+            inset: 0;
+            z-index: 999;
+            pointer-events: none;
+            /* Biar klik tembus ke model */
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 24px;
+            padding-top: 32px;
+        }
+
+        .pointer-auto {
+            pointer-events: auto;
+        }
+
+        /* Tombol Close (Mirip PWA) */
+        .close-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(4px);
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+
+        .close-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* Tombol AR (Golden Button) */
+        .ar-btn {
+            background-color: #F0C419;
+            color: #111827;
+            width: 100%;
+            max-width: 335px;
+            height: 56px;
+            border-radius: 16px;
+            border: none;
+            font-size: 16px;
+            font-weight: 700;
+            font-family: 'Inter', sans-serif;
+            box-shadow: 0 20px 25px rgba(0, 0, 0, 0.15);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.1s;
+            margin: 0 auto;
+            /* Center horizontal */
+        }
+
+        .ar-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* Poster Loading */
+        #poster {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100%;
+            color: white;
+            font-size: 1.25rem;
+            font-weight: 700;
+            flex-direction: column;
+        }
+
+        .animate-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: .5;
+            }
+        }
+
+        /* Modal Error */
+        #error-modal {
+            display: none;
+            position: absolute;
+            inset: 0;
+            z-index: 10000;
+            background-color: rgba(0, 0, 0, 0.7);
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            pointer-events: auto;
+        }
+
+        .modal-content {
+            background-color: white;
+            border-radius: 20px;
+            padding: 24px;
+            max-width: 320px;
+            text-align: center;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- LAYER MODEL -->
+    <div id="model-container">
+        <!-- 
+            ATTRIBUTES MATCHING PWA (ARViewer.jsx):
+            src: Dynamic
+            ios-src: "" 
+            ar: true
+            ar-modes: "scene-viewer webxr quick-look"
+            camera-controls: true
+            auto-rotate: true
+            disable-pan: true
+            disable-zoom: true
+            touch-action: "none"
+            shadow-intensity: "1"
+            loading: "eager"
+        -->
+        <model-viewer id="viewer" src="" ios-src="" ar ar-modes="scene-viewer webxr quick-look" camera-controls
+            auto-rotate disable-pan disable-zoom touch-action="none" shadow-intensity="1" loading="eager"
+            style="width: 100%; height: 100%; background-color: black;">
+
+            <div slot="poster" id="poster">
+                <div class="animate-pulse">Memuat Model 3D...</div>
+            </div>
+        </model-viewer>
+    </div>
+
+    <!-- LAYER UI -->
+    <div id="ui-layer">
+        <!-- Top Right: Close Button -->
+        <!-- Top Right: Close Button (PWA Style) -->
+        <div style="display: flex; justify-content: flex-end;" class="pointer-auto">
+            <button onclick="handleClose()" style="background: transparent; border: none; cursor: pointer; padding: 0;">
+                <div
+                    style="width: 48px; height: 48px; border-radius: 50%; background: rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(8px); box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </div>
+            </button>
+        </div>
+
+        <!-- DEBUG PANEL REMOVED FOR CLEAN LOOK (Uncomment if needed) 
+        <div class="pointer-auto" style="background: rgba(0,0,0,0.5); font-size: 10px; color: yellow; position: absolute; top: 80px; left: 20px; max-width: 200px;">
+           <div id="debug-log"></div>
+        </div>
+        -->
+
+        <!-- UNSUPPORTED MODAL -->
+        <div id="error-modal">
+            <div class="modal-content">
+                <div style="font-size: 40px; margin-bottom: 16px;">📱❌</div>
+                <h3 style="font-size: 18px; font-weight: bold; color: #111827; margin-bottom: 8px;">
+                    Perangkat Tidak Mendukung
+                </h3>
+                <p style="font-size: 14px; color: #6B7280; line-height: 1.5; margin-bottom: 24px;">
+                    Maaf, HP Anda belum dilengkapi sensor ARCore. Tapi Anda tetap bisa melihat model di layar ini!
+                </p>
+                <button onclick="document.getElementById('error-modal').style.display='none'"
+                    style="width: 100%; padding: 12px; border-radius: 12px; background-color: #1E3A5F; color: white; font-weight: 600; border: none; cursor: pointer;">
+                    Oke, Mengerti
+                </button>
+            </div>
+        </div>
+
+        <!-- LOAD ERROR VISIBLE FEEDBACK -->
+        <div id="load-error"
+            style="display:none; position:absolute; inset:0; z-index:500; background:black; color:white; align-items:center; justify-content:center; flex-direction:column; text-align:center; padding:20px;">
+            <div style="font-size:30px; margin-bottom:10px;">⚠️</div>
+            <div style="font-weight:bold;">Gagal Memuat Model</div>
+            <div id="load-error-msg" style="font-size:12px; color:#aaa; margin-top:5px;"></div>
+        </div>
+
+        <script>
+            const viewer = document.getElementById('viewer');
+            const loadError = document.getElementById('load-error');
+            const loadErrorMsg = document.getElementById('load-error-msg');
+
+            // 1. Get Param 'src' (Direct Full URL) or Fallback 'model'
+            const params = new URLSearchParams(window.location.search);
+            let modelSrc = params.get('src');
+
+            // Backward compatibility
+            if (!modelSrc) {
+                const modelName = params.get('model');
+                if (modelName) {
+                    modelSrc = 'ar-assets/' + modelName;
+                }
+            }
+
+            if (modelSrc) {
+                console.log("Loading Model:", modelSrc);
+                viewer.src = modelSrc;
+            } else {
+                console.error("No model source provided.");
+                loadError.style.display = 'flex';
+                loadErrorMsg.textContent = "URL Model tidak ditemukan.";
+            }
+
+            // 2. Handle Close - Deep Link back to App
+            window.handleClose = function () {
+                console.log("Close Clicked - Deep Linking...");
+                // Trigger Android Deep Link (No Reload)
+                window.location.href = "kasir://return";
+            }
+
+            // 3. Events
+            viewer.addEventListener('load', () => {
+                console.log("Model Loaded Successfully");
+                loadError.style.display = 'none';
+            });
+
+            viewer.addEventListener('error', (e) => {
+                console.error("Model Load Error:", e);
+                loadError.style.display = 'flex';
+                const detail = e.detail ? JSON.stringify(e.detail) : "Unknown Error";
+                loadErrorMsg.textContent = "Gagal memuat: " + modelSrc + "\n" + detail;
+            });
+
+        </script>
+</body>
+
+</html>
