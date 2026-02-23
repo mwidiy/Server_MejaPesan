@@ -187,6 +187,7 @@ app.use('/api/ar', require('./routes/arRoutes'));
 app.use('/api/store', require('./routes/storeRoutes'));
 app.use('/api/auth', require('./routes/authRoutes')); // NEW: Google Login Route
 app.use('/api/payment', require('./routes/paymentRoutes')); // Duitku Payment
+app.use('/api/payments', require('./routes/paymentRoutes')); // ALIAS/WEBHOOK FIX: Duitku/Pakasir Webhook with "s" 
 app.use('/api/withdraw', require('./routes/withdrawalRoutes')); // NEW: Withdrawal
 
 // --- PRIORITAS 5: GLOBAL ERROR HANDLER (PENUTUP AIB) ---
