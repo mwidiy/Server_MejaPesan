@@ -34,26 +34,13 @@ const uploadImage = multer({
     limits: { fileSize: 1024 * 1024 * 5 } // 5MB Limit (Prevents DoS)
 });
 
-// --- AR Upload Config ---
-const storageAr = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, arDir);
-    },
-    filename: (req, file, cb) => {
-        const safeName = file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, '_');
-        const uniqueName = Date.now() + '_' + safeName;
-        cb(null, uniqueName);
-    }
-});
+// --- AR Upload Config (Supabase - Memory Storage) ---
+// File is held in RAM (buffer) as we will stream it directly to Supabase
+const storageAr = multer.memoryStorage();
 
 const filterAr = (req, file, cb) => {
-    const allowedGlb = ['.glb'];
-    const ext = path.extname(file.originalname).toLowerCase();
-    if ((file.mimetype === 'model/gltf-binary' || file.mimetype === 'application/octet-stream') && allowedGlb.includes(ext)) {
-        cb(null, true);
-    } else {
-        cb(new Error('Invalid file type! Only GLB models are allowed.'), false);
-    }
+    // Basic validation, strict validation is in the controller
+    cb(null, true);
 };
 
 const uploadAr = multer({

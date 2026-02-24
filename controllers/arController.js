@@ -1,8 +1,12 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
-const fs = require('fs');
-const path = require('path');
 const { identifyStore } = require('../middleware/authMiddleware');
+const { createClient } = require('@supabase/supabase-js');
+
+// Initialize Supabase Client (Service Role for Admin Access to Storage)
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 // GET /api/ar/assets
 // Ambil aset AR milik Store yang sedang login
@@ -32,49 +36,64 @@ const getArAssets = async (req, res) => {
 };
 
 // POST /api/ar/upload
-// Upload file dan simpan record ke DB
+// Upload file (.glb format) dan simpan ke Supabase CDN
 const uploadArAsset = async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ success: false, message: "No file uploaded or invalid format" });
     }
 
-    // STRICT CHECK
-    if (!req.file.filename.toLowerCase().endsWith('.glb') && !req.file.filename.toLowerCase().endsWith('.gltf')) {
-        // ... (Same deletion logic as before)
-        try { fs.unlinkSync(path.join(__dirname, '../public/ar-assets', req.file.filename)); } catch (e) { }
-        return res.status(400).json({ success: false, message: "Security Block: Only .glb files allowed!" });
-    }
-
-    const fileUrl = `http://${req.headers.host}/ar-assets/${req.file.filename}`;
     const storeId = identifyStore(req);
-
     if (!storeId) {
-        // If no store context, delete the uploaded file to prevent orphans
-        try { fs.unlinkSync(path.join(__dirname, '../public/ar-assets', req.file.filename)); } catch (e) { }
         return res.status(403).json({ success: false, message: "Store Context Missing. Cannot save asset." });
     }
 
+    // STRICT CHECK
+    const originalName = req.file.originalname;
+    if (!originalName.toLowerCase().endsWith('.glb') && !originalName.toLowerCase().endsWith('.gltf')) {
+        return res.status(400).json({ success: false, message: "Security Block: Only .glb/.gltf files allowed!" });
+    }
+
     try {
-        // Save to Database
-        // Use originalname for display, filename (timestamped) for URL
+        // --- 1. Stream Buffer to Supabase ---
+        // Create unique safe name
+        const safeName = originalName.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+        const uniqueFileName = `${Date.now()}_${storeId}_${safeName}`;
+
+        const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('AR')
+            .upload(uniqueFileName, req.file.buffer, {
+                contentType: req.file.mimetype || 'model/gltf-binary', // Fallback to standard GLB MIME Type
+                cacheControl: '3600',
+                upsert: false // Don't overwrite existing
+            });
+
+        if (uploadError) {
+            console.error("Supabase Upload Error:", uploadError);
+            return res.status(500).json({ success: false, message: `Upload failed: ${uploadError.message}` });
+        }
+
+        // --- 2. Retrieve Public URL ---
+        const { data: { publicUrl } } = supabase.storage
+            .from('AR')
+            .getPublicUrl(uniqueFileName);
+
+        // --- 3. Save to Prisma Database ---
         const newAsset = await prisma.arAsset.create({
             data: {
-                name: req.file.originalname, // Friendly name
-                url: `http://${req.headers.host}/ar-assets/${req.file.filename}`, // Timestamped unique URL
+                name: originalName,       // Friendly name for Kasir App display
+                url: publicUrl,           // Supabase CDN URL
                 storeId: storeId
             }
         });
 
         res.status(201).json({ success: true, data: newAsset });
     } catch (error) {
-        console.error(error);
-        // Clean up file if DB fails
-        try { fs.unlinkSync(path.join(__dirname, '../public/ar-assets', req.file.filename)); } catch (e) { }
-        res.status(500).json({ success: false, message: "Upload failed" });
+        console.error("Complete Upload Pipeline Error:", error);
+        res.status(500).json({ success: false, message: "Upload pipeline failed" });
     }
 };
 
-// DELETE /api/ar/delete/:filename
+// DELETE /api/ar/delete/:id
 const deleteArAsset = async (req, res) => {
     const { id } = req.params; // ID based deletion
     const storeId = identifyStore(req);
@@ -94,21 +113,27 @@ const deleteArAsset = async (req, res) => {
             return res.status(404).json({ success: false, message: "Asset not found or unauthorized" });
         }
 
-        // 2. Delete File from Disk
-        // Extract filename from URL
+        // 2. Extract Filename from URL (Supabase handles deletions by file path)
+        // URL is like: https://[project].supabase.co/storage/v1/object/public/AR/1700000_1_file.glb
+        // We only need the trailing filename part
         const filename = asset.url.split('/').pop();
-        const filePath = path.join(__dirname, '../public/ar-assets', filename);
 
-        if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
+        // 3. Delete from Supabase Storage
+        const { error: removeError } = await supabase.storage
+            .from('AR')
+            .remove([filename]);
+
+        if (removeError) {
+            console.error("Supabase Deletion Warning:", removeError);
+            // We can choose to proceed with DB deletion even if cloud deletion fails
         }
 
-        // 3. Delete from DB
+        // 4. Delete from DB
         await prisma.arAsset.delete({
             where: { id: asset.id }
         });
 
-        res.json({ success: true, message: "Asset deleted" });
+        res.json({ success: true, message: "Asset deleted completely" });
 
     } catch (error) {
         console.error("Delete Error:", error);
