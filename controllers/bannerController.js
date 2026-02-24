@@ -7,6 +7,7 @@ const path = require('path');
 // Sama seperti di productController
 const removeImage = (filePath) => {
     if (!filePath) return;
+    if (filePath.includes('res.cloudinary.com')) return; // Abaikan URL Cloudinary
 
     // filePath usually looks like: http://localhost:3000/uploads/image-123.jpg
     // We need to extract the filename: image-123.jpg
@@ -82,7 +83,7 @@ const createBanner = async (req, res) => {
         });
     }
 
-    const imageUrl = `http://${req.headers.host}/uploads/${req.file.filename}`;
+    const imageUrl = req.file.path; // SECURED: Cloudinary URL
 
     try {
         // Ensure storeId is missing? No, verifyToken ensures we have user, but we should assert it.
@@ -156,7 +157,7 @@ const updateBanner = async (req, res) => {
                 removeImage(existingBanner.image);
             }
             // Update URL baru
-            imageUrl = `http://${req.headers.host}/uploads/${req.file.filename}`;
+            imageUrl = req.file.path; // SECURED: Cloudinary URL
         }
         // Jika tidak upload: Gunakan gambar lama (imageUrl sudah diset ke existingBanner.image)
 
@@ -187,7 +188,7 @@ const updateBanner = async (req, res) => {
         console.error("Error updating banner:", error);
         // Hapus gambar baru jika gagal update DB
         if (req.file) {
-            const newImageUrl = `http://${req.headers.host}/uploads/${req.file.filename}`;
+            const newImageUrl = req.file.path;
             removeImage(newImageUrl);
         }
         res.status(500).json({ success: false, message: "Gagal update banner", error: error.message });

@@ -3,9 +3,10 @@ const prisma = new PrismaClient();
 const fs = require('fs');
 const path = require('path');
 
-// Helper function untuk menghapus gambar fisik
+// Helper function untuk menghapus gambar fisik (diabaikan kalau Cloudinary URL)
 const removeImage = (filePath) => {
     if (!filePath) return;
+    if (filePath.includes('res.cloudinary.com')) return; // Cloudinary handled via Dashboard/API separately if needed
 
     // filePath usually looks like: http://localhost:3000/uploads/image-123.jpg
     // We need to extract the filename: image-123.jpg
@@ -122,7 +123,7 @@ const createProduct = async (req, res) => {
     let imageUrl = req.body.image;
 
     if (req.file) {
-        imageUrl = `http://${req.headers.host}/uploads/${req.file.filename}`;
+        imageUrl = req.file.path; // SECURED: Extract Cloudinary Secure URL
     }
 
     try {
@@ -184,7 +185,7 @@ const updateProduct = async (req, res) => {
     let imageUrl = req.body.image;
 
     if (req.file) {
-        imageUrl = `http://${req.headers.host}/uploads/${req.file.filename}`;
+        imageUrl = req.file.path; // SECURED: Extract Cloudinary Secure URL
     }
 
     try {

@@ -6,7 +6,7 @@ const path = require('path');
 // Helper to delete old file if needed
 const deleteFile = (filename) => {
     if (!filename) return;
-    // Cek apakah itu URL atau nama file local
+    // Cek apakah itu URL atau nama file local (Cloudinary URL tak perlu dihapus lokal)
     if (filename.startsWith('http')) return;
 
     const filePath = path.join(__dirname, '../public/images', filename);
@@ -130,7 +130,7 @@ const uploadLogo = async (req, res) => {
         // Delete old logo
         if (store.logo) deleteFile(store.logo);
 
-        const filename = req.file.filename;
+        const filename = req.file.path; // SECURED: Extract Cloudinary Secure URL
 
         const updated = await prisma.store.update({
             where: { id: req.storeId },
@@ -156,7 +156,7 @@ const uploadQris = async (req, res) => {
         // Delete old qris
         if (store.qrisImage) deleteFile(store.qrisImage);
 
-        const filename = req.file.filename;
+        const filename = req.file.path; // SECURED: Extract Cloudinary Secure URL
 
         const updated = await prisma.store.update({
             where: { id: req.storeId },
