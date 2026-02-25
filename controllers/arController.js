@@ -22,10 +22,14 @@ const getArAssets = async (req, res) => {
             orderBy: { createdAt: 'desc' }
         });
 
-        // DEFAULT ASSETS (Public for everyone)
+        // DEFAULT ASSETS (Public for everyone, hosted on Supabase CDN)
+        // Using `getPublicUrl` guarantees we always use the correct Supabase domain
+        const default1Url = supabase.storage.from('AR').getPublicUrl('defaul1.glb').data.publicUrl;
+        const default2Url = supabase.storage.from('AR').getPublicUrl('defaul2.glb').data.publicUrl;
+
         const defaultAssets = [
-            { name: 'anime.glb', url: `http://${req.headers.host}/ar-assets/anime.glb`, isDefault: true },
-            { name: 'cake.glb', url: `http://${req.headers.host}/ar-assets/cake.glb`, isDefault: true }
+            { name: 'defaul1.glb', url: default1Url, isDefault: true },
+            { name: 'defaul2.glb', url: default2Url, isDefault: true }
         ];
 
         res.json({ success: true, data: [...defaultAssets, ...assets] });
