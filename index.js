@@ -53,7 +53,7 @@ const globalLimiter = rateLimit({
 // Pasang Satpam (Limiter) HANYA untuk semua jalur API (bukan gambar/assets)
 app.use('/api/', globalLimiter);
 
-app.use(cors({
+const corsOptions = {
   // CORS Dinamis (Lebih Aman!)
   origin: function (origin, callback) {
     // 1. Kasir Android & Postman (Tanpa Origin) diizinkan karena pake perlindungan JWT
@@ -78,7 +78,23 @@ app.use(cors({
   },
   methods: ["GET", "POST", "PUT", "DELETE"],
   credentials: true
-}));
+};
+
+// Custom CORS Wrapper to by-pass specific webhooks
+app.use((req, res, next) => {
+  // 1. PERKECUALIAN KHUSUS WEBHOOK TELEGRAM/WA
+  // Jika URL yang diakses adalah proses pencairan saldo, matikan CORS
+  // (Aman karena route di bawah dilindungi HMAC SHA-256 Auth Token)
+  if (req.originalUrl && req.originalUrl.includes('/api/withdraw/process')) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    if (req.method === 'OPTIONS') return res.sendStatus(200);
+    return next();
+  }
+
+  // 2. Selain URL di atas, jalankan filter Satpam CORS Strict
+  cors(corsOptions)(req, res, next);
+});
 
 // PRIORITAS 4: Batasi ukuran teks JSON dari 50MB jadi 2MB (Anti Payload Bomb)
 // Ingat: Upload Image & AR (.glb) tetap aman karena diproses terpisah oleh Multer!
