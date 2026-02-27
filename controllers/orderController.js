@@ -478,16 +478,15 @@ const getOrderByTransactionCode = async (req, res) => {
         const baseTime = new Date(order.createdAt); // Fix 1: Locked base time
         const predictedTime = new Date(baseTime.getTime() + (totalMinutesAhead + myPrep) * 60000);
 
-        // Fix 2: Force WIB Timezone (Asia/Jakarta) regardless of Koyeb server location
-        const formatter = new Intl.DateTimeFormat('id-ID', {
-            timeZone: 'Asia/Jakarta',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false
-        });
+        // Fix 2: Force WIB Timezone (UTC+7) manually to avoid Intl.DateTimeFormat crashing on minimal Node servers (e.g. Alpine Linux on Koyeb)
+        const utcMillis = predictedTime.getTime();
+        const wibMillis = utcMillis + (7 * 60 * 60 * 1000); // Add 7 hours manually
+        const wibDate = new Date(wibMillis);
 
-        // Output format is usually "HH.mm", convert separator to ":"
-        const clockTime = formatter.format(predictedTime).replace('.', ':');
+        // Extract using getUTC to get the shifted time
+        const hours = String(wibDate.getUTCHours()).padStart(2, '0');
+        const minutes = String(wibDate.getUTCMinutes()).padStart(2, '0');
+        const clockTime = `${hours}:${minutes}`;
 
         res.status(200).json({
             success: true,
