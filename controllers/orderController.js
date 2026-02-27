@@ -473,17 +473,21 @@ const getOrderByTransactionCode = async (req, res) => {
             myPrep = Math.max(...order.items.map(i => i.product.prepTime || 5));
         }
 
-        // C. Total Service Time Calculation
-        // If system is idle, starts from Now. If busy, adds to cumulative.
-        // For simplicity: Now + Total Minutes Wait
-        const now = new Date();
-        const predictedTime = new Date(now.getTime() + (totalMinutesAhead + myPrep) * 60000);
+        // C. Total Service Time Calculation (TAHAP 38: Smart Queue Time Prediction Fix)
+        // If system is idle, starts from Order Creation time (NOT new Date() to avoid moving target on refresh)
+        const baseTime = new Date(order.createdAt); // Fix 1: Locked base time
+        const predictedTime = new Date(baseTime.getTime() + (totalMinutesAhead + myPrep) * 60000);
 
+        // Fix 2: Force WIB Timezone (Asia/Jakarta) regardless of Koyeb server location
+        const formatter = new Intl.DateTimeFormat('id-ID', {
+            timeZone: 'Asia/Jakarta',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+        });
 
-        // Format to HH:mm
-        const hours = String(predictedTime.getHours()).padStart(2, '0');
-        const minutes = String(predictedTime.getMinutes()).padStart(2, '0');
-        const clockTime = `${hours}:${minutes}`;
+        // Output format is usually "HH.mm", convert separator to ":"
+        const clockTime = formatter.format(predictedTime).replace('.', ':');
 
         res.status(200).json({
             success: true,
