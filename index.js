@@ -17,6 +17,9 @@ const productRoutes = require('./routes/productRoutes');
 const bannerRoutes = require('./routes/bannerRoutes');
 
 const app = express();
+const compression = require('compression'); // NEW: GZIP Compression
+app.use(compression()); // Compress all routes!
+
 const server = http.createServer(app); // Bungkus app express dengan HTTP server
 // Inisialisasi Socket.IO
 const io = new Server(server, {
