@@ -225,14 +225,18 @@ const createOrder = async (req, res) => {
         // 7. Real-time Trigger
         // Only emit if NOT waiting for payment. If waiting, emit later after payment success.
         if (req.io && !isQrisUnpaid) {
-            // Emit to Global (Legacy Support)
-            req.io.emit('new_order', newOrder);
+            // OPTIMIZATION 44: Asynchronous Socket Offloading
+            // Eksekusi Emit di background agar API Checkout merespon instan seketika
+            setTimeout(() => {
+                // Emit to Global (Legacy Support)
+                req.io.emit('new_order', newOrder);
 
-            // Emit to Store Room (Multi-Tenancy Support)
-            if (storeId) {
-                req.io.to(`store_${storeId}`).emit('new_order', newOrder);
-            }
-            console.log(`📡 Emitted 'new_order': ${newOrder.transactionCode} (Store: ${storeId})`);
+                // Emit to Store Room (Multi-Tenancy Support)
+                if (storeId) {
+                    req.io.to(`store_${storeId}`).emit('new_order', newOrder);
+                }
+                console.log(`📡 Emitted 'new_order': ${newOrder.transactionCode} (Store: ${storeId})`);
+            }, 0);
         } else if (isQrisUnpaid) {
             console.log(`Creating QRIS Order ${newOrder.transactionCode} - Waiting for Payment (No Socket Emit yet)`);
         }
@@ -362,13 +366,15 @@ const updateOrderStatus = async (req, res) => {
             }
         });
 
-        // Emit socket event
+        // Emit socket event (Asynchronous Offloading)
         if (req.io) {
-            req.io.emit('order_status_updated', updatedOrder);
-            if (updatedOrder.storeId) {
-                req.io.to(`store_${updatedOrder.storeId}`).emit('order_status_updated', updatedOrder);
-            }
-            console.log(`📡 Emitted 'order_status_updated': ${updatedOrder.transactionCode} -> ${status} (Store: ${updatedOrder.storeId})`);
+            setTimeout(() => {
+                req.io.emit('order_status_updated', updatedOrder);
+                if (updatedOrder.storeId) {
+                    req.io.to(`store_${updatedOrder.storeId}`).emit('order_status_updated', updatedOrder);
+                }
+                console.log(`📡 Emitted 'order_status_updated': ${updatedOrder.transactionCode} -> ${status} (Store: ${updatedOrder.storeId})`);
+            }, 0);
         }
 
         res.status(200).json({
@@ -596,7 +602,7 @@ const requestCancel = async (req, res) => {
             include: { items: { include: { product: true } } }
         });
 
-        if (req.io) req.io.emit('order_status_updated', updatedOrder);
+        if (req.io) setTimeout(() => req.io.emit('order_status_updated', updatedOrder), 0);
 
         res.json({ success: true, message, data: updatedOrder });
 
@@ -623,7 +629,7 @@ const approveCancel = async (req, res) => {
             include: { items: { include: { product: true } } }
         });
 
-        if (req.io) req.io.emit('order_status_updated', updatedOrder);
+        if (req.io) setTimeout(() => req.io.emit('order_status_updated', updatedOrder), 0);
         res.json({ success: true, message: "Pembatalan Disetujui", data: updatedOrder });
     } catch (e) {
         console.error(e);
@@ -672,7 +678,7 @@ const rejectCancel = async (req, res) => {
             include: { items: { include: { product: true } } }
         });
 
-        if (req.io) req.io.emit('order_status_updated', updatedOrder);
+        if (req.io) setTimeout(() => req.io.emit('order_status_updated', updatedOrder), 0);
         res.json({ success: true, message, data: updatedOrder });
     } catch (e) {
         console.error(e);
@@ -706,7 +712,7 @@ const verifyRefund = async (req, res) => {
             data: { refundStatus: 'Refunded' }
         });
 
-        if (req.io) req.io.emit('order_status_updated', updatedOrder);
+        if (req.io) setTimeout(() => req.io.emit('order_status_updated', updatedOrder), 0);
 
         res.json({
             success: true,
