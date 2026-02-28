@@ -178,11 +178,15 @@ const createOrder = async (req, res) => {
         const isQrisUnpaid = paymentMethod === 'qris' && (!paymentStatus || paymentStatus === 'Unpaid');
         const initialStatus = isQrisUnpaid ? 'WaitingPayment' : 'Pending';
 
+        // TAHAP 47: ONE TRUE QUEUE FIX
+        // DO NOT assign queueNumber to 'WaitingPayment' orders. They get it when Paid (in paymentController).
+        const finalQueueNumber = isQrisUnpaid ? null : nextQueueNumber;
+
         // 6. Prisma Transaction (Atomic Create)
         const newOrder = await prisma.$transaction(async (tx) => {
             const orderData = {
                 transactionCode,
-                queueNumber: nextQueueNumber, // Save Daily Number
+                queueNumber: finalQueueNumber, // Save Daily Number if Cash, otherwise null
                 customerName,
                 // Don't use scalar tableId, use relation below
                 orderType: finalOrderType,

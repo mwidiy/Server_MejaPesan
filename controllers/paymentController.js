@@ -164,18 +164,37 @@ const handleCallback = async (req, res) => {
                     // Update Payment AND Status if needed
                     const newStatus = order.status === 'WaitingPayment' ? 'Pending' : order.status;
 
+                    // TAHAP 47: ONE TRUE QUEUE FIX
+                    // Jika pesanan asalnya WaitingPayment (belum punya QueueNumber), kita buatkan nomor antrean SEKARANG.
+                    let generatedQueueNumber = order.queueNumber;
+                    if (order.status === 'WaitingPayment' && !order.queueNumber) {
+                        const todayStart = new Date();
+                        todayStart.setHours(0, 0, 0, 0);
+
+                        const whereQueue = { createdAt: { gte: todayStart } };
+                        if (order.storeId) whereQueue.storeId = order.storeId;
+
+                        const lastOrderToday = await prisma.order.findFirst({
+                            where: whereQueue,
+                            orderBy: { createdAt: 'desc' },
+                            select: { queueNumber: true }
+                        });
+                        generatedQueueNumber = lastOrderToday && lastOrderToday.queueNumber ? lastOrderToday.queueNumber + 1 : 1;
+                    }
+
                     const updatedOrder = await prisma.order.update({
                         where: { transactionCode: order_id.toString() },
                         data: {
                             paymentStatus: 'Paid',
-                            status: newStatus
+                            status: newStatus,
+                            queueNumber: generatedQueueNumber // Assign new number if it was waiting
                         },
                         include: {
                             table: { include: { location: true } },
                             items: { include: { product: true } }
                         }
                     });
-                    console.log(`[Pakasir] Order ${order_id} UPDATED to Paid (via Webhook)`);
+                    console.log(`[Pakasir] Order ${order_id} UPDATED to Paid (Queue: ${generatedQueueNumber}) (via Webhook)`);
 
                     // EMIT NEW ORDER if it was waiting
                     if (req.io) {
@@ -245,11 +264,29 @@ const checkStatus = async (req, res) => {
             if (order && order.paymentStatus !== 'Paid') {
                 const newStatus = order.status === 'WaitingPayment' ? 'Pending' : order.status;
 
+                // TAHAP 47: ONE TRUE QUEUE FIX (Polling Fallback)
+                let generatedQueueNumber = order.queueNumber;
+                if (order.status === 'WaitingPayment' && !order.queueNumber) {
+                    const todayStart = new Date();
+                    todayStart.setHours(0, 0, 0, 0);
+
+                    const whereQueue = { createdAt: { gte: todayStart } };
+                    if (order.storeId) whereQueue.storeId = order.storeId;
+
+                    const lastOrderToday = await prisma.order.findFirst({
+                        where: whereQueue,
+                        orderBy: { createdAt: 'desc' },
+                        select: { queueNumber: true }
+                    });
+                    generatedQueueNumber = lastOrderToday && lastOrderToday.queueNumber ? lastOrderToday.queueNumber + 1 : 1;
+                }
+
                 const updatedOrder = await prisma.order.update({
                     where: { transactionCode: orderId },
                     data: {
                         paymentStatus: 'Paid',
-                        status: newStatus
+                        status: newStatus,
+                        queueNumber: generatedQueueNumber
                     },
                     include: {
                         table: { include: { location: true } },
