@@ -1,6 +1,7 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const crypto = require('crypto');
+const { clearCache } = require('../middleware/cacheMiddleware');
 
 // Helper: Slugify Name (Huruf kecil, spasi jadi strip)
 const createSlug = (name) => {
@@ -88,6 +89,9 @@ exports.createTable = async (req, res) => {
             },
             include: { location: true },
         });
+
+        clearCache('/api/tables', req.storeId);
+
         res.status(201).json(table);
     } catch (error) {
         res.status(500).json({ error: `Failed to create table: ${error.message}` });
@@ -156,6 +160,8 @@ exports.updateTable = async (req, res) => {
             }
         }
 
+        clearCache('/api/tables', req.storeId);
+
         res.json(table);
     } catch (error) {
         res.status(500).json({ error: `Failed to update table: ${error.message}` });
@@ -212,6 +218,8 @@ exports.updateTableStatus = async (req, res) => {
             }
         }
 
+        clearCache('/api/tables', req.storeId);
+
         res.json(table);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -235,6 +243,9 @@ exports.deleteTable = async (req, res) => {
         await prisma.table.delete({
             where: { id: parseInt(id) },
         });
+
+        clearCache('/api/tables', req.storeId);
+
         res.json({ message: "Table deleted successfully" });
     } catch (error) {
         res.status(500).json({ error: error.message });

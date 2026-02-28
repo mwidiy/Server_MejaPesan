@@ -2,6 +2,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const fs = require('fs');
 const path = require('path');
+const { clearCache } = require('../middleware/cacheMiddleware');
 
 // Helper function untuk menghapus gambar fisik (diabaikan kalau Cloudinary URL)
 const removeImage = (filePath) => {
@@ -159,6 +160,9 @@ const createProduct = async (req, res) => {
             category: newProduct.category ? newProduct.category.name : null
         };
 
+        // BACA: Bersihkan RAM Katalog Toko ini agar pengunjung PWA dapet produk baru
+        clearCache('/api/products', req.storeId);
+
         // Trigger update real-time
         req.io.emit('products_updated');
 
@@ -223,6 +227,9 @@ const updateProduct = async (req, res) => {
             category: updatedProduct.category ? updatedProduct.category.name : null
         };
 
+        // BACA: Bersihkan RAM Katalog Toko ini agar pengunjung PWA dapet harga terbaru
+        clearCache('/api/products', req.storeId);
+
         // Trigger update real-time
         req.io.emit('products_updated');
 
@@ -261,6 +268,9 @@ const deleteProduct = async (req, res) => {
         await prisma.product.delete({
             where: { id: Number(id) }
         });
+
+        // BACA: Bersihkan RAM Katalog agar pengunjung PWA tak beli barang kosong
+        clearCache('/api/products', req.storeId);
 
         // Trigger update real-time
         req.io.emit('products_updated');

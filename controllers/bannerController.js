@@ -2,6 +2,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const fs = require('fs');
 const path = require('path');
+const { clearCache } = require('../middleware/cacheMiddleware');
 
 // Helper function untuk menghapus gambar fisik
 // Sama seperti di productController
@@ -114,6 +115,8 @@ const createBanner = async (req, res) => {
             req.io.emit('banners_updated');
         }
 
+        clearCache('/api/banners', req.storeId);
+
         res.status(201).json({
             success: true,
             message: "Banner berhasil ditambahkan",
@@ -178,6 +181,8 @@ const updateBanner = async (req, res) => {
             req.io.emit('banners_updated');
         }
 
+        clearCache('/api/banners', req.storeId);
+
         res.status(200).json({
             success: true,
             message: "Banner berhasil diupdate",
@@ -219,6 +224,8 @@ const deleteBanner = async (req, res) => {
         if (req.io) {
             req.io.emit('banners_updated');
         }
+
+        clearCache('/api/banners', req.storeId);
 
         res.status(200).json({
             success: true,

@@ -1,5 +1,6 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
+const { clearCache } = require('../middleware/cacheMiddleware');
 
 // GET /api/categories
 // Ambil semua kategori
@@ -54,6 +55,9 @@ const createCategory = async (req, res) => {
             }
         });
 
+        // Hancurkan cache kategori toko ini
+        clearCache('/api/categories', req.storeId);
+
         res.status(201).json({
             success: true,
             message: "Kategori berhasil ditambahkan",
@@ -93,6 +97,9 @@ const updateCategory = async (req, res) => {
             where: { id: Number(id) },
             data: { name: name }
         });
+
+        // Hancurkan cache kategori toko ini
+        clearCache('/api/categories', req.storeId);
 
         res.status(200).json({
             success: true,
@@ -141,6 +148,9 @@ const deleteCategory = async (req, res) => {
         await prisma.category.delete({
             where: { id: categoryId }
         });
+
+        // Hancurkan cache kategori toko ini
+        clearCache('/api/categories', req.storeId);
 
         res.status(200).json({
             success: true,

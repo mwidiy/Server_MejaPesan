@@ -2,6 +2,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const fs = require('fs');
 const path = require('path');
+const { clearCache } = require('../middleware/cacheMiddleware');
 
 // Helper to delete old file if needed
 const deleteFile = (filename) => {
@@ -111,6 +112,8 @@ const updateStore = async (req, res) => {
             });
         }
 
+        clearCache('/api/store', req.storeId);
+
         res.json({ success: true, data: updated });
     } catch (error) {
         console.error("Update Store Error:", error);
@@ -137,6 +140,8 @@ const uploadLogo = async (req, res) => {
             data: { logo: filename }
         });
 
+        clearCache('/api/store', req.storeId);
+
         res.json({ success: true, data: updated });
     } catch (error) {
         console.error("Upload Logo Error:", error);
@@ -162,6 +167,8 @@ const uploadQris = async (req, res) => {
             where: { id: req.storeId },
             data: { qrisImage: filename }
         });
+
+        clearCache('/api/store', req.storeId);
 
         res.json({ success: true, data: updated });
     } catch (error) {

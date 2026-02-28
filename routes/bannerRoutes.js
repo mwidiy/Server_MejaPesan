@@ -2,11 +2,11 @@ const express = require('express');
 const router = express.Router();
 const bannerController = require('../controllers/bannerController');
 const { uploadImage } = require('../middleware/upload');
-
 const { verifyToken } = require('../middleware/authMiddleware');
+const { cacheMiddleware } = require('../middleware/cacheMiddleware');
 
 // GET /api/banners -> getAllBanners (Public or Private depending on usage, handled by identifyStore inside controller)
-router.get('/', bannerController.getAllBanners);
+router.get('/', cacheMiddleware(300), bannerController.getAllBanners);
 
 // Protected Routes (Require Authentication)
 // POST /api/banners -> upload.single('image'), createBanner

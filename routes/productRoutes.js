@@ -3,23 +3,17 @@ const router = express.Router();
 const productController = require('../controllers/productController');
 
 const { uploadImage } = require('../middleware/upload');
+const { cacheMiddleware } = require('../middleware/cacheMiddleware');
 
 const { verifyToken } = require('../middleware/authMiddleware');
 
-// GET /api/products
-// GET /api/products (Public with ?storeId=...)
-router.get('/', productController.getAllProducts);
+// Define routes
+// Apply 5-minute Cache to Catalog Get (Bypass DB on Refresh Spikes)
+router.get('/', cacheMiddleware(300), productController.getAllProducts);
+router.get('/:id', cacheMiddleware(300), productController.getProductById);
 
-// GET /api/products/:id
-router.get('/:id', productController.getProductById);
-
-// POST /api/products
 router.post('/', verifyToken, uploadImage.single('image'), productController.createProduct);
-
-// PUT /api/products/:id
 router.put('/:id', verifyToken, uploadImage.single('image'), productController.updateProduct);
-
-// DELETE /api/products/:id
 router.delete('/:id', verifyToken, productController.deleteProduct);
 
 module.exports = router;
