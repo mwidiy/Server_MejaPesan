@@ -458,19 +458,19 @@ const getOrderByTransactionCode = async (req, res) => {
 
         // A. Duration of orders ahead
         for (const qOrder of ordersQueue) {
-            let orderPrep = 5; // Default buffer
+            let orderPrep = 20; // Default buffer
             if (qOrder.items && qOrder.items.length > 0) {
                 // Take max prep time of items in that order (parallel prep). Fix 39: Poisoned Queue Guard
-                const maxP = Math.max(...qOrder.items.map(i => i.product?.prepTime || 5));
+                const maxP = Math.max(...qOrder.items.map(i => i.product?.prepTime || 20));
                 orderPrep = maxP;
             }
             totalMinutesAhead += orderPrep;
         }
 
         // B. Duration of MY order
-        let myPrep = 5;
+        let myPrep = 20;
         if (order.items && order.items.length > 0) {
-            myPrep = Math.max(...order.items.map(i => i.product?.prepTime || 5)); // Fix 39: Guard
+            myPrep = Math.max(...order.items.map(i => i.product?.prepTime || 20)); // Fix 39: Guard
         }
 
         // C. Total Service Time Calculation (TAHAP 38: Smart Queue Time Prediction Fix)
