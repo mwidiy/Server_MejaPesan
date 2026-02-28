@@ -152,7 +152,7 @@ const createOrder = async (req, res) => {
         // --- SMART QUEUE LOGIC END ---
 
 
-        // 7. Daily Queue Number Logic (New - Smart Queue 2.0)
+        // 7. Daily Queue Number Logic (New - Smart Queue 2.0 Atomic Fetch)
         // Scope Queue Number to Store? Usually yes.
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
@@ -162,10 +162,16 @@ const createOrder = async (req, res) => {
         };
         if (storeId) whereQueue.storeId = parseInt(storeId);
 
-        const todayOrderCount = await prisma.order.count({
-            where: whereQueue
+        // OPTIMIZATION 43: Gunakan findFirst(orderBy desc) alih-alih count() yang memakan CPU lambat
+        const lastOrderToday = await prisma.order.findFirst({
+            where: whereQueue,
+            orderBy: { createdAt: 'desc' },
+            select: { queueNumber: true }
         });
-        const nextQueueNumber = todayOrderCount + 1;
+
+        const nextQueueNumber = lastOrderToday && lastOrderToday.queueNumber
+            ? lastOrderToday.queueNumber + 1
+            : 1;
 
         // LOGIC FIX: QRIS Order starts as 'WaitingPayment', NOT 'Pending'
         // This prevents Kasir from seeing unpaid orders immediately
