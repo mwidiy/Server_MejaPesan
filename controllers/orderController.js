@@ -155,9 +155,17 @@ const createOrder = async (req, res) => {
         // 7. Daily Queue Number Logic (New - Smart Queue 2.0 Atomic Fetch)
         // Scope Queue Number to Store? Usually yes.
         // TAHAP 47 Hotfix: Accurate WIB Timezone Reset
-        const now = new Date();
-        const wibTime = new Date(now.getTime() + (7 * 60 * 60 * 1000));
-        const todayStart = new Date(Date.UTC(wibTime.getUTCFullYear(), wibTime.getUTCMonth(), wibTime.getUTCDate(), -7, 0, 0, 0));
+        // TAHAP 48 Hotfix 2: Absolute WIB Timezone Reset (Bulletproof)
+        // Kita paksa NodeJS ngebaca kalender 'Asia/Jakarta' saat ini juga
+        const wibDateString = new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" });
+        const wibDateObj = new Date(wibDateString);
+
+        // Cari jam 00:00:00 pada hari WIB tersebut
+        wibDateObj.setHours(0, 0, 0, 0);
+
+        // Kembalikan ke format UTC agar Prisma bisa ngebaca dengan benar di database (yang nyimpen UTC)
+        // Karena WIB itu UTC+7, maka 00:00 WIB = 17:00 UTC (hari sebelumnya)
+        const todayStart = new Date(wibDateObj.getTime() - (7 * 60 * 60 * 1000));
 
         const whereQueue = {
             createdAt: { gte: todayStart }

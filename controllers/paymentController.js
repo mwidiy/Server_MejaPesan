@@ -168,9 +168,15 @@ const handleCallback = async (req, res) => {
                     // Jika pesanan asalnya WaitingPayment (belum punya QueueNumber), kita buatkan nomor antrean SEKARANG.
                     let generatedQueueNumber = order.queueNumber;
                     if (order.status === 'WaitingPayment' && (!order.queueNumber || order.queueNumber === 0)) {
-                        const now = new Date();
-                        const wibTime = new Date(now.getTime() + (7 * 60 * 60 * 1000));
-                        const todayStart = new Date(Date.UTC(wibTime.getUTCFullYear(), wibTime.getUTCMonth(), wibTime.getUTCDate(), -7, 0, 0, 0));
+                        // TAHAP 48 Hotfix 3: Webhook Timezone Sync
+                        const parts = new Intl.DateTimeFormat('en-US', {
+                            timeZone: 'Asia/Jakarta',
+                            year: 'numeric', month: 'numeric', day: 'numeric'
+                        }).formatToParts(new Date());
+
+                        const wib = {};
+                        parts.forEach(p => wib[p.type] = p.value);
+                        const todayStart = new Date(Date.UTC(wib.year, wib.month - 1, wib.day, -7, 0, 0, 0));
 
                         const whereQueue = { createdAt: { gte: todayStart } };
                         if (order.storeId) whereQueue.storeId = order.storeId;
@@ -268,9 +274,15 @@ const checkStatus = async (req, res) => {
                 // TAHAP 47: ONE TRUE QUEUE FIX (Polling Fallback)
                 let generatedQueueNumber = order.queueNumber;
                 if (order.status === 'WaitingPayment' && (!order.queueNumber || order.queueNumber === 0)) {
-                    const now = new Date();
-                    const wibTime = new Date(now.getTime() + (7 * 60 * 60 * 1000));
-                    const todayStart = new Date(Date.UTC(wibTime.getUTCFullYear(), wibTime.getUTCMonth(), wibTime.getUTCDate(), -7, 0, 0, 0));
+                    // TAHAP 48 Hotfix 3: Webhook Polling Timezone Sync
+                    const parts = new Intl.DateTimeFormat('en-US', {
+                        timeZone: 'Asia/Jakarta',
+                        year: 'numeric', month: 'numeric', day: 'numeric'
+                    }).formatToParts(new Date());
+
+                    const wib = {};
+                    parts.forEach(p => wib[p.type] = p.value);
+                    const todayStart = new Date(Date.UTC(wib.year, wib.month - 1, wib.day, -7, 0, 0, 0));
 
                     const whereQueue = { createdAt: { gte: todayStart } };
                     if (order.storeId) whereQueue.storeId = order.storeId;
