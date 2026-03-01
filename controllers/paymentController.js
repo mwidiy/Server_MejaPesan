@@ -167,16 +167,17 @@ const handleCallback = async (req, res) => {
                     // TAHAP 47: ONE TRUE QUEUE FIX
                     // Jika pesanan asalnya WaitingPayment (belum punya QueueNumber), kita buatkan nomor antrean SEKARANG.
                     let generatedQueueNumber = order.queueNumber;
-                    if (order.status === 'WaitingPayment' && !order.queueNumber) {
-                        const todayStart = new Date();
-                        todayStart.setHours(0, 0, 0, 0);
+                    if (order.status === 'WaitingPayment' && (!order.queueNumber || order.queueNumber === 0)) {
+                        const now = new Date();
+                        const wibTime = new Date(now.getTime() + (7 * 60 * 60 * 1000));
+                        const todayStart = new Date(Date.UTC(wibTime.getUTCFullYear(), wibTime.getUTCMonth(), wibTime.getUTCDate(), -7, 0, 0, 0));
 
                         const whereQueue = { createdAt: { gte: todayStart } };
                         if (order.storeId) whereQueue.storeId = order.storeId;
 
                         const lastOrderToday = await prisma.order.findFirst({
                             where: whereQueue,
-                            orderBy: { createdAt: 'desc' },
+                            orderBy: { queueNumber: 'desc' },
                             select: { queueNumber: true }
                         });
                         generatedQueueNumber = lastOrderToday && lastOrderToday.queueNumber ? lastOrderToday.queueNumber + 1 : 1;
@@ -266,16 +267,17 @@ const checkStatus = async (req, res) => {
 
                 // TAHAP 47: ONE TRUE QUEUE FIX (Polling Fallback)
                 let generatedQueueNumber = order.queueNumber;
-                if (order.status === 'WaitingPayment' && !order.queueNumber) {
-                    const todayStart = new Date();
-                    todayStart.setHours(0, 0, 0, 0);
+                if (order.status === 'WaitingPayment' && (!order.queueNumber || order.queueNumber === 0)) {
+                    const now = new Date();
+                    const wibTime = new Date(now.getTime() + (7 * 60 * 60 * 1000));
+                    const todayStart = new Date(Date.UTC(wibTime.getUTCFullYear(), wibTime.getUTCMonth(), wibTime.getUTCDate(), -7, 0, 0, 0));
 
                     const whereQueue = { createdAt: { gte: todayStart } };
                     if (order.storeId) whereQueue.storeId = order.storeId;
 
                     const lastOrderToday = await prisma.order.findFirst({
                         where: whereQueue,
-                        orderBy: { createdAt: 'desc' },
+                        orderBy: { queueNumber: 'desc' },
                         select: { queueNumber: true }
                     });
                     generatedQueueNumber = lastOrderToday && lastOrderToday.queueNumber ? lastOrderToday.queueNumber + 1 : 1;

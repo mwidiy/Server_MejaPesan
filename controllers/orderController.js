@@ -154,18 +154,21 @@ const createOrder = async (req, res) => {
 
         // 7. Daily Queue Number Logic (New - Smart Queue 2.0 Atomic Fetch)
         // Scope Queue Number to Store? Usually yes.
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
+        // TAHAP 47 Hotfix: Accurate WIB Timezone Reset
+        const now = new Date();
+        const wibTime = new Date(now.getTime() + (7 * 60 * 60 * 1000));
+        const todayStart = new Date(Date.UTC(wibTime.getUTCFullYear(), wibTime.getUTCMonth(), wibTime.getUTCDate(), -7, 0, 0, 0));
 
         const whereQueue = {
             createdAt: { gte: todayStart }
         };
         if (storeId) whereQueue.storeId = parseInt(storeId);
 
-        // OPTIMIZATION 43: Gunakan findFirst(orderBy desc) alih-alih count() yang memakan CPU lambat
+        // OPTIMIZATION 43: Gunakan findFirst alih-alih count() yang memakan CPU lambat
+        // TAHAP 47 Hotfix: MUST sort by queueNumber desc, NOT createdAt, so it ignores 0 from Unpaid QRIS
         const lastOrderToday = await prisma.order.findFirst({
             where: whereQueue,
-            orderBy: { createdAt: 'desc' },
+            orderBy: { queueNumber: 'desc' },
             select: { queueNumber: true }
         });
 
@@ -179,8 +182,8 @@ const createOrder = async (req, res) => {
         const initialStatus = isQrisUnpaid ? 'WaitingPayment' : 'Pending';
 
         // TAHAP 47: ONE TRUE QUEUE FIX
-        // DO NOT assign queueNumber to 'WaitingPayment' orders. They get it when Paid (in paymentController).
-        const finalQueueNumber = isQrisUnpaid ? null : nextQueueNumber;
+        // DO NOT assign actual queueNumber to 'WaitingPayment' orders. Assign 0 (Schema default).
+        const finalQueueNumber = isQrisUnpaid ? 0 : nextQueueNumber;
 
         // 6. Prisma Transaction (Atomic Create)
         const newOrder = await prisma.$transaction(async (tx) => {
