@@ -3,6 +3,8 @@ const NodeCache = require("node-cache");
 // STD TTL: 300 detik (5 menit). Check period: 60 detik.
 const myCache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
 
+const { identifyStore } = require('./authMiddleware');
+
 /**
  * Middleware untuk meng-cache response API (GET)
  * @param {number} duration - Durasi cache dalam detik (default: 300)
@@ -15,8 +17,8 @@ const cacheMiddleware = (duration = 300) => {
         }
 
         // 1. Kenali toko mana yang request (Multi-tenant isolation)
-        // Store ID diambil dari parameter, query, middleware auth(req.storeId), atau origin headers
-        const storeId = req.query.storeId || req.storeId || req.headers['x-store-id'] || 'global';
+        // Store ID diambil dengan utilitas identifyStore (bisa dari query atau PWA token)
+        const storeId = identifyStore(req) || 'global';
 
         // 2. Buat Cache Key yang unik per Toko dan URL
         // Contoh: "store_2_/api/products?status=active"
