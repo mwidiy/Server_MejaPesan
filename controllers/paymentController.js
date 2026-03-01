@@ -178,15 +178,19 @@ const handleCallback = async (req, res) => {
                         parts.forEach(p => wib[p.type] = p.value);
                         const todayStart = new Date(Date.UTC(wib.year, wib.month - 1, wib.day, -7, 0, 0, 0));
 
-                        const whereQueue = { createdAt: { gte: todayStart } };
+                        // TAHAP 49: NEW QUEUE PHILOSOPHY (Active Pending Count)
+                        const whereQueue = {
+                            status: { in: ['Pending', 'Processing'] }
+                        };
                         if (order.storeId) whereQueue.storeId = order.storeId;
+                        whereQueue.createdAt = { gte: todayStart };
 
-                        const lastOrderToday = await prisma.order.findFirst({
-                            where: whereQueue,
-                            orderBy: { queueNumber: 'desc' },
-                            select: { queueNumber: true }
+                        const activeQueueCount = await prisma.order.count({
+                            where: whereQueue
                         });
-                        generatedQueueNumber = lastOrderToday && lastOrderToday.queueNumber ? lastOrderToday.queueNumber + 1 : 1;
+
+                        // Queue number is strictly live waiting people + 1
+                        generatedQueueNumber = activeQueueCount + 1;
                     }
 
                     const updatedOrder = await prisma.order.update({
@@ -284,15 +288,18 @@ const checkStatus = async (req, res) => {
                     parts.forEach(p => wib[p.type] = p.value);
                     const todayStart = new Date(Date.UTC(wib.year, wib.month - 1, wib.day, -7, 0, 0, 0));
 
-                    const whereQueue = { createdAt: { gte: todayStart } };
+                    // TAHAP 49: NEW QUEUE PHILOSOPHY (Active Pending Count)
+                    const whereQueue = {
+                        status: { in: ['Pending', 'Processing'] }
+                    };
                     if (order.storeId) whereQueue.storeId = order.storeId;
+                    whereQueue.createdAt = { gte: todayStart };
 
-                    const lastOrderToday = await prisma.order.findFirst({
-                        where: whereQueue,
-                        orderBy: { queueNumber: 'desc' },
-                        select: { queueNumber: true }
+                    const activeQueueCount = await prisma.order.count({
+                        where: whereQueue
                     });
-                    generatedQueueNumber = lastOrderToday && lastOrderToday.queueNumber ? lastOrderToday.queueNumber + 1 : 1;
+
+                    generatedQueueNumber = activeQueueCount + 1;
                 }
 
                 const updatedOrder = await prisma.order.update({

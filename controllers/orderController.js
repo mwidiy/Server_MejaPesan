@@ -167,22 +167,24 @@ const createOrder = async (req, res) => {
         // Karena WIB itu UTC+7, maka 00:00 WIB = 17:00 UTC (hari sebelumnya)
         const todayStart = new Date(wibDateObj.getTime() - (7 * 60 * 60 * 1000));
 
+        // TAHAP 49: NEW QUEUE PHILOSOPHY (Active Pending Count)
+        // User explicitly stated queue number should be the number of people currently waiting.
         const whereQueue = {
-            createdAt: { gte: todayStart }
+            status: { in: ['Pending', 'Processing'] }
         };
+        // Scope by store
         if (storeId) whereQueue.storeId = parseInt(storeId);
 
-        // OPTIMIZATION 43: Gunakan findFirst alih-alih count() yang memakan CPU lambat
-        // TAHAP 47 Hotfix: MUST sort by queueNumber desc, NOT createdAt, so it ignores 0 from Unpaid QRIS
-        const lastOrderToday = await prisma.order.findFirst({
-            where: whereQueue,
-            orderBy: { queueNumber: 'desc' },
-            select: { queueNumber: true }
+        // Limit the search window to today just in case there are orphaned pending orders from weeks ago
+        whereQueue.createdAt = { gte: todayStart };
+
+        const activeQueueCount = await prisma.order.count({
+            where: whereQueue
         });
 
-        const nextQueueNumber = lastOrderToday && lastOrderToday.queueNumber
-            ? lastOrderToday.queueNumber + 1
-            : 1;
+        // The queue number is simply the count of people currently waiting PLUS ONE (myself)
+        // e.g. If 0 people are pending, my queue number is 1. If 5 people are pending, my queue number is 6.
+        const nextQueueNumber = activeQueueCount + 1;
 
         // LOGIC FIX: QRIS Order starts as 'WaitingPayment', NOT 'Pending'
         // This prevents Kasir from seeing unpaid orders immediately
