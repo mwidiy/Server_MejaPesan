@@ -1,8 +1,11 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const PDFDocument = require('pdfkit');
+const NodeCache = require('node-cache');
 // Ensure you have ran: npm install pdfkit
 
+// L1 Pricing Cache (TTL: 60 seconds). Bypass DB for extreme checkout latency.
+const pricingCache = new NodeCache({ stdTTL: 60, checkperiod: 10 });
 
 // Helper untuk generate Transaction Code
 // Format: TRX-[YYYYMMDD]-[RANDOM4DIGIT] (Contoh: TRX-20240101-A1B2)
@@ -53,11 +56,33 @@ const createOrder = async (req, res) => {
 
         // --- SMART QUEUE LOGIC START (Moved Up for Pricing) ---
         // 1. Fetch products to get prepTime AND PRICE (Security: Server-side pricing)
+        // TAHAP 55: L1 Pricing Cache Implementation
         const productIds = items.map(item => item.productId);
-        const products = await prisma.product.findMany({
-            where: { id: { in: productIds } },
-            select: { id: true, prepTime: true, name: true, price: true } // Added price
+        const products = [];
+        const missingProductIds = [];
+
+        // Check L1 Cache First
+        productIds.forEach(id => {
+            const cachedProduct = pricingCache.get(`product_${id}`);
+            if (cachedProduct) {
+                products.push(cachedProduct);
+            } else {
+                missingProductIds.push(id);
+            }
         });
+
+        // Fetch missing products from DB
+        if (missingProductIds.length > 0) {
+            const dbProducts = await prisma.product.findMany({
+                where: { id: { in: missingProductIds } },
+                select: { id: true, prepTime: true, name: true, price: true }
+            });
+
+            dbProducts.forEach(p => {
+                pricingCache.set(`product_${p.id}`, p);
+                products.push(p);
+            });
+        }
 
         const productMap = {};
         products.forEach(p => productMap[p.id] = p);

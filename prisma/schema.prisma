@@ -175,6 +175,10 @@ model Order {
   
   storeId       Int
   store         Store       @relation(fields: [storeId], references: [id])
+
+  // Optimization Indexes for High Traffic Querying
+  @@index([status, createdAt])
+  @@index([transactionCode])
 }
 
 // 6. DETAIL TRANSAKSI (ITEM)
