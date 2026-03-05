@@ -39,7 +39,10 @@ const createTransaction = async (req, res) => {
             return res.json({ success: true, status: 'Paid', message: 'Order already paid' });
         }
 
-        const signature = getDuitkuSignature(DUITKU_MERCHANT_CODE, orderId.toString(), amount, DUITKU_API_KEY);
+        const finalAmount = parseInt(amount);
+        const signature = getDuitkuSignature(DUITKU_MERCHANT_CODE, orderId.toString(), finalAmount, DUITKU_API_KEY);
+
+        console.log(`[Duitku Debug] Signature String Components: Code=${DUITKU_MERCHANT_CODE}, OrderId=${orderId.toString()}, Amount=${finalAmount}, Key=${DUITKU_API_KEY}`);
 
         // Build Item Details
         const itemDetails = order?.items?.map(item => ({
@@ -48,13 +51,14 @@ const createTransaction = async (req, res) => {
             quantity: item.quantity
         })) || [{
             name: "Pesanan QuackXel",
-            price: amount,
+            price: finalAmount,
             quantity: 1
         }];
 
         const payload = {
             merchantCode: DUITKU_MERCHANT_CODE,
-            paymentAmount: parseInt(amount),
+            paymentAmount: finalAmount,
+            paymentMethod: "SP", // Gunakan SP (ShopeePay/QRIS) sbg default test. Wajib diaktifkan di dashboard Sandbox Duitku!
             merchantOrderId: orderId.toString(),
             productDetails: `Pesanan QuackXel #${orderId}`,
             email: email,
@@ -88,10 +92,17 @@ const createTransaction = async (req, res) => {
             });
         }
 
+        let errorMessage = result.statusMessage || result.Message || 'Gagal membuat tagihan Duitku';
+
+        // Peringatan khusus jika Merchant belum mengaktifkan metode pembayaran di Sandbox Duitku
+        if (errorMessage.toLowerCase().includes('payment channel not available')) {
+            errorMessage = "Metode Pembayaran belum diaktifkan. Silakan login ke Dashboard Sandbox Duitku -> My Project -> Centang metode ShopeePay (SP) / QRIS.";
+        }
+
         console.error("[Duitku] Failed Creating Payment Link:", result);
         res.status(400).json({
             success: false,
-            message: result.statusMessage || 'Gagal membuat tagihan Duitku',
+            message: errorMessage,
             details: result
         });
 
