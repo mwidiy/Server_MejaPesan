@@ -1,6 +1,5 @@
 const { PrismaClient } = require('@prisma/client');
 const { getDuitkuSignature, getDuitkuCallbackSignature } = require('../utils/crypto');
-const crypto = require('crypto');
 const prisma = new PrismaClient();
 
 // --- DUITKU CONFIG ---
@@ -8,14 +7,13 @@ const DUITKU_API_KEY = process.env.DUITKU_API_KEY;
 const DUITKU_MERCHANT_CODE = process.env.DUITKU_MERCHANT_CODE;
 const DUITKU_ENV = process.env.DUITKU_ENV || 'sandbox'; // 'sandbox' atau 'production'
 
-// Duitku Pop Hosted UI Base URL
 const DUITKU_BASE_URL = DUITKU_ENV === 'sandbox'
-    ? 'https://api-sandbox.duitku.com/api/merchant'
-    : 'https://api-prod.duitku.com/api/merchant';
+    ? 'https://sandbox.duitku.com/webapi/api/merchant'
+    : 'https://passport.duitku.com/webapi/api/merchant';
 
 const callbackUrl = process.env.DUITKU_CALLBACK_URL || 'https://api.quacxel.my.id/api/payments/webhook';
 
-// 1. Create Transaction (Inquiry via Duitku Pop)
+// 1. Create Transaction (Inquiry)
 const createTransaction = async (req, res) => {
     const { orderId, amount, customerName = 'Customer', email = 'customer@quacxel.my.id', phone = '08123456789' } = req.body;
 
@@ -42,70 +40,77 @@ const createTransaction = async (req, res) => {
         }
 
         const finalAmount = parseInt(amount);
+        const signature = getDuitkuSignature(DUITKU_MERCHANT_CODE, orderId.toString(), finalAmount, DUITKU_API_KEY);
+
+        console.log(`[Duitku Debug] Signature String Components: Code=${DUITKU_MERCHANT_CODE}, OrderId=${orderId.toString()}, Amount=${finalAmount}, Key=${DUITKU_API_KEY}`);
 
         // Build Item Details
         let itemDetails = order?.items?.map(item => ({
             name: item.product.name.substring(0, 50),
             price: item.price,
             quantity: item.quantity
-        }));
+        })) || [];
 
-        // Duitku Pop Payload
+        // Validate Duitku Math (items sum must EXACTLY equal paymentAmount)
+        const itemsSum = itemDetails.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+        if (itemsSum !== finalAmount || itemDetails.length === 0) {
+            itemDetails = [{
+                name: `Pesanan QuackXel #${orderId}`,
+                price: finalAmount,
+                quantity: 1
+            }];
+        }
+
         const payload = {
             merchantCode: DUITKU_MERCHANT_CODE,
             paymentAmount: finalAmount,
+            paymentMethod: "SP", // Gunakan SP (ShopeePay/QRIS) sbg default test. Wajib diaktifkan di dashboard Sandbox Duitku!
             merchantOrderId: orderId.toString(),
             productDetails: `Pesanan QuackXel #${orderId}`,
             email: email,
-            phoneNumber: phone || '08123456789',
-            customerVaName: customerName.substring(0, 50),
-            itemDetails: itemDetails || [{ name: 'QuackXel Order', price: finalAmount, quantity: 1 }],
+            phoneNumber: phone,
+            itemDetails: itemDetails,
+            customerVaName: customerName,
             callbackUrl: callbackUrl,
-            returnUrl: process.env.DUITKU_RETURN_URL || `https://quacxel.my.id/order?orderId=${orderId}`,
-            expiryPeriod: 60, // 1 Jam
-            signature: getDuitkuSignature(DUITKU_MERCHANT_CODE, orderId.toString(), finalAmount, DUITKU_API_KEY)
+            returnUrl: process.env.FRONTEND_URL ? `${process.env.FRONTEND_URL}/order/${orderId}` : `https://quacxel.my.id/order/${orderId}`,
+            signature: signature,
+            expiryPeriod: 15 // 15 mins expiry
         };
 
-        // Hit Duitku API
-        const apiUrl = `${DUITKU_BASE_URL}/createInvoice`;
-        const response = await fetch(apiUrl, {
+        const response = await fetch(`${DUITKU_BASE_URL}/v2/inquiry`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
 
-        const responseText = await response.text();
-        let duitkuRes;
-        try {
-            duitkuRes = JSON.parse(responseText);
-        } catch (e) {
-            console.error("❌ Failed to parse Duitku JSON:", responseText);
-            return res.status(500).json({ success: false, message: 'Invalid response from payment gateway' });
-        }
+        const result = await response.json();
+        if (process.env.NODE_ENV !== 'production') console.log("[Duitku] Inquiry Response:", result);
 
-        console.log(`[Duitku] Response:`, duitkuRes);
-
-        if (duitkuRes.statusCode === '00' && duitkuRes.paymentUrl) {
-            // Success creating Duitku Checkout URL
+        if (result.statusCode === '00') {
             return res.json({
                 success: true,
-                message: 'Payment URL generated',
                 data: {
-                    orderId: orderId,
-                    amount: finalAmount,
-                    paymentUrl: duitkuRes.paymentUrl,
-                    reference: duitkuRes.reference
+                    paymentUrl: result.paymentUrl,
+                    reference: result.reference,
+                    amount: amount,
+                    orderId: orderId.toString()
                 }
             });
-        } else {
-            console.error("❌ Duitku API Error:", duitkuRes);
-            return res.status(400).json({
-                success: false,
-                message: duitkuRes.statusMessage || duitkuRes.Message || 'Gagal memproses pembayaran Web Duitku'
-            });
         }
+
+        let errorMessage = result.statusMessage || result.Message || 'Gagal membuat tagihan Duitku';
+
+        // Peringatan khusus jika Merchant belum mengaktifkan metode pembayaran di Sandbox Duitku
+        if (errorMessage.toLowerCase().includes('payment channel not available')) {
+            errorMessage = "Metode Pembayaran belum diaktifkan. Silakan login ke Dashboard Sandbox Duitku -> My Project -> Centang metode ShopeePay (SP) / QRIS.";
+        }
+
+        console.error("[Duitku] Failed Creating Payment Link:", result);
+        res.status(400).json({
+            success: false,
+            message: errorMessage,
+            details: result
+        });
 
     } catch (error) {
         console.error("[Duitku] Create Error:", error);
