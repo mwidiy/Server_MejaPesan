@@ -328,9 +328,78 @@ const expireOrder = async (req, res) => {
     }
 };
 
+// 5. Manual Bypass Simulator (Developer Testing)
+const simulatePayment = async (req, res) => {
+    try {
+        const { orderId } = req.body;
+        if (!orderId) return res.status(400).json({ success: false, message: 'Missing orderId' });
+
+        const order = await prisma.order.findUnique({ where: { transactionCode: orderId } });
+        if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
+
+        if (order.paymentStatus === 'Paid') {
+            return res.json({ success: true, message: 'Already paid' });
+        }
+
+        const newStatus = order.status === 'WaitingPayment' ? 'Pending' : order.status;
+
+        let generatedQueueNumber = order.queueNumber;
+        if (order.status === 'WaitingPayment' && (!order.queueNumber || order.queueNumber === 0)) {
+            const parts = new Intl.DateTimeFormat('en-US', {
+                timeZone: 'Asia/Jakarta',
+                year: 'numeric', month: 'numeric', day: 'numeric'
+            }).formatToParts(new Date());
+
+            const wib = {};
+            parts.forEach(p => wib[p.type] = p.value);
+            const todayStart = new Date(Date.UTC(wib.year, wib.month - 1, wib.day, -7, 0, 0, 0));
+
+            const whereQueue = { status: { in: ['Pending', 'Processing'] } };
+            if (order.storeId) whereQueue.storeId = order.storeId;
+            whereQueue.createdAt = { gte: todayStart };
+
+            const activeQueueCount = await prisma.order.count({ where: whereQueue });
+            generatedQueueNumber = activeQueueCount + 1;
+        }
+
+        const updatedOrder = await prisma.order.update({
+            where: { transactionCode: orderId },
+            data: {
+                paymentStatus: 'Paid',
+                status: newStatus,
+                queueNumber: generatedQueueNumber
+            },
+            include: {
+                table: { include: { location: true } },
+                items: { include: { product: true } }
+            }
+        });
+
+        console.log(`[Simulator] Order ${orderId} forced to PAID`);
+
+        if (req.io) {
+            req.io.emit('order_update', { transactionCode: orderId, status: 'Paid', source: 'simulator' });
+            req.io.to(orderId).emit('order_update', { transactionCode: orderId, status: 'Paid', source: 'simulator-direct' });
+
+            if (order.status === 'WaitingPayment') {
+                req.io.emit('new_order', updatedOrder);
+                if (updatedOrder.storeId) {
+                    req.io.to(`store_${updatedOrder.storeId}`).emit('new_order', updatedOrder);
+                }
+            }
+        }
+
+        res.json({ success: true, message: 'Simulated Successfully' });
+    } catch (error) {
+        console.error("Simulator Error:", error);
+        res.status(500).json({ success: false, message: 'Internal Error' });
+    }
+};
+
 module.exports = {
     createTransaction,
     handleCallback,
     checkStatus,
-    expireOrder
+    expireOrder,
+    simulatePayment
 };

@@ -18,4 +18,7 @@ router.get('/check-status/:orderId', paymentController.checkStatus);
 // 4. Expire Order (Timer Timeout)
 router.post('/expire-order', express.urlencoded({ extended: true }), paymentController.expireOrder);
 
+// 5. Simulator Bypass
+router.post('/simulate', express.json(), paymentController.simulatePayment);
+
 module.exports = router;
