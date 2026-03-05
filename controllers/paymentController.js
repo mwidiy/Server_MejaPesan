@@ -45,15 +45,21 @@ const createTransaction = async (req, res) => {
         console.log(`[Duitku Debug] Signature String Components: Code=${DUITKU_MERCHANT_CODE}, OrderId=${orderId.toString()}, Amount=${finalAmount}, Key=${DUITKU_API_KEY}`);
 
         // Build Item Details
-        const itemDetails = order?.items?.map(item => ({
+        let itemDetails = order?.items?.map(item => ({
             name: item.product.name.substring(0, 50),
             price: item.price,
             quantity: item.quantity
-        })) || [{
-            name: "Pesanan QuackXel",
-            price: finalAmount,
-            quantity: 1
-        }];
+        })) || [];
+
+        // Validate Duitku Math (items sum must EXACTLY equal paymentAmount)
+        const itemsSum = itemDetails.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+        if (itemsSum !== finalAmount || itemDetails.length === 0) {
+            itemDetails = [{
+                name: `Pesanan QuackXel #${orderId}`,
+                price: finalAmount,
+                quantity: 1
+            }];
+        }
 
         const payload = {
             merchantCode: DUITKU_MERCHANT_CODE,
