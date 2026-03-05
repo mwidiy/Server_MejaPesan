@@ -62,22 +62,16 @@ const createTransaction = async (req, res) => {
             itemDetails: itemDetails || [{ name: 'QuackXel Order', price: finalAmount, quantity: 1 }],
             callbackUrl: callbackUrl,
             returnUrl: process.env.DUITKU_RETURN_URL || `https://quacxel.my.id/order?orderId=${orderId}`,
-            expiryPeriod: 60 // 1 Jam
+            expiryPeriod: 60, // 1 Jam
+            signature: getDuitkuSignature(DUITKU_MERCHANT_CODE, orderId.toString(), finalAmount, DUITKU_API_KEY)
         };
-
-        // Authentication for Duitku Pop (SHA256 Header)
-        const timestamp = Date.now().toString();
-        const signature = crypto.createHash('sha256').update(DUITKU_MERCHANT_CODE + timestamp + DUITKU_API_KEY).digest('hex');
 
         // Hit Duitku API
         const apiUrl = `${DUITKU_BASE_URL}/createInvoice`;
         const response = await fetch(apiUrl, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'x-duitku-signature': signature,
-                'x-duitku-timestamp': timestamp,
-                'x-duitku-merchantcode': DUITKU_MERCHANT_CODE
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify(payload)
         });
