@@ -64,7 +64,7 @@ const createTransaction = async (req, res) => {
         const payload = {
             merchantCode: DUITKU_MERCHANT_CODE,
             paymentAmount: finalAmount,
-            paymentMethod: "SP", // Gunakan SP (ShopeePay/QRIS) sbg default test. Wajib diaktifkan di dashboard Sandbox Duitku!
+            paymentMethod: "BC", // Diganti ke BC (BCA VA) agar tombol "Simulasi" muncul di Sandbox UI
             merchantOrderId: orderId.toString(),
             productDetails: `Pesanan QuackXel #${orderId}`,
             email: email,
