@@ -10,6 +10,7 @@ router.post('/create-transaction', paymentController.createTransaction);
 // if URL-encoded is needed add express.urlencoded middleware here.
 // Safest to add both middleware in index.js or specific here.
 router.post('/callback', express.urlencoded({ extended: true }), paymentController.handleCallback);
+router.post('/webhook', express.urlencoded({ extended: true }), paymentController.handleCallback); // ALIAS for Duitku/Midtrans fallback
 
 // 3. Polling Status (Backup)
 // 3. Polling Status (Backup)

@@ -88,7 +88,7 @@ app.use((req, res, next) => {
   // 1. PERKECUALIAN KHUSUS WEBHOOK TELEGRAM/WA
   // Jika URL yang diakses adalah proses pencairan saldo, matikan CORS
   // (Aman karena route di bawah dilindungi HMAC SHA-256 Auth Token)
-  if (req.originalUrl && req.originalUrl.includes('/api/withdraw/process')) {
+  if (req.originalUrl && (req.originalUrl.includes('/api/withdraw/process') || req.originalUrl.includes('/api/payment/webhook') || req.originalUrl.includes('/api/payments/webhook') || req.originalUrl.includes('/api/payment/callback') || req.originalUrl.includes('/api/payments/callback'))) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     if (req.method === 'OPTIONS') return res.sendStatus(200);
