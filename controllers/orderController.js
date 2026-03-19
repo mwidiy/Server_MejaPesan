@@ -2,6 +2,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const PDFDocument = require('pdfkit');
 const NodeCache = require('node-cache');
+const admin = require('../utils/firebase');
 // Ensure you have ran: npm install pdfkit
 
 // L1 Pricing Cache (TTL: 60 seconds). Bypass DB for extreme checkout latency.
@@ -269,7 +270,7 @@ const createOrder = async (req, res) => {
         if (req.io && !isQrisUnpaid) {
             // OPTIMIZATION 44: Asynchronous Socket Offloading
             // Eksekusi Emit di background agar API Checkout merespon instan seketika
-            setTimeout(() => {
+            setTimeout(async () => {
                 // Emit to Global (Legacy Support)
                 req.io.emit('new_order', newOrder);
 
@@ -278,6 +279,36 @@ const createOrder = async (req, res) => {
                     req.io.to(`store_${storeId}`).emit('new_order', newOrder);
                 }
                 console.log(`📡 Emitted 'new_order': ${newOrder.transactionCode} (Store: ${storeId})`);
+                
+                // 8. Trigger FCM Push Notification
+                if (storeId) {
+                    try {
+                        const storeData = await prisma.store.findUnique({
+                            where: { id: parseInt(storeId) },
+                            include: { owner: true } 
+                        });
+                        
+                        const fcmToken = storeData?.owner?.fcmToken;
+                        if (fcmToken) {
+                            const message = {
+                                notification: {
+                                    title: "📦 Pesanan Baru Masuk!",
+                                    body: `${customerName} - ${newOrder.transactionCode}`
+                                },
+                                data: {
+                                    transactionCode: newOrder.transactionCode,
+                                    customerName: customerName
+                                },
+                                token: fcmToken
+                            };
+                            
+                            await admin.messaging().send(message);
+                            console.log(`✅ Push Notification sent for order ${newOrder.transactionCode}`);
+                        }
+                    } catch (err) {
+                        console.error('❌ FCM Error:', err.message);
+                    }
+                }
             }, 0);
         } else if (isQrisUnpaid) {
             console.log(`Creating QRIS Order ${newOrder.transactionCode} - Waiting for Payment (No Socket Emit yet)`);

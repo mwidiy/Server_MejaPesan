@@ -19,6 +19,7 @@ model User {
   role      String   @default("cashier")
   createdAt DateTime @default(now())
   store     Store?
+  fcmToken  String?
 }
 
 model Store {

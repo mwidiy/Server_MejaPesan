@@ -102,4 +102,25 @@ const googleLogin = async (req, res) => {
     }
 };
 
-module.exports = { googleLogin };
+const updateFcmToken = async (req, res) => {
+    try {
+        const { fcmToken } = req.body;
+        const userId = req.user.id;
+
+        if (!fcmToken) {
+            return res.status(400).json({ success: false, message: "fcmToken required" });
+        }
+
+        const updatedUser = await prisma.user.update({
+            where: { id: userId },
+            data: { fcmToken }
+        });
+
+        res.json({ success: true, message: "FCM Token updated successfully", data: { fcmToken: updatedUser.fcmToken } });
+    } catch (error) {
+        console.error("FCM Token Error:", error);
+        res.status(500).json({ success: false, message: `Failed to update FCM Token: ${error.message}` });
+    }
+};
+
+module.exports = { googleLogin, updateFcmToken };
