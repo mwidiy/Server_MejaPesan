@@ -17,6 +17,7 @@ model User {
   name      String?
   googleId  String?  @unique
   role      String   @default("cashier")
+  fcmToken  String?
   createdAt DateTime @default(now())
   store     Store?
 }

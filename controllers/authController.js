@@ -102,4 +102,24 @@ const googleLogin = async (req, res) => {
     }
 };
 
-module.exports = { googleLogin };
+const saveFcmToken = async (req, res) => {
+    const { userId, fcmToken } = req.body;
+
+    if (!userId || !fcmToken) {
+        return res.status(400).json({ message: "userId and fcmToken are required" });
+    }
+
+    try {
+        const user = await prisma.user.update({
+            where: { id: parseInt(userId) },
+            data: { fcmToken }
+        });
+
+        res.json({ success: true, message: "FCM Token saved successfully", fcmToken: user.fcmToken });
+    } catch (error) {
+        console.error("Save FCM Token Error:", error);
+        res.status(500).json({ message: `Failed to save FCM Token: ${error.message}` });
+    }
+};
+
+module.exports = { googleLogin, saveFcmToken };
