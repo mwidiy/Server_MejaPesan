@@ -1,23 +1,31 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-// --- PAKASIR CONFIG ---
-const PAKASIR_API_KEY = process.env.PAKASIR_API_KEY;
-const PAKASIR_PROJECT = process.env.PAKASIR_PROJECT_SLUG;
-// Default to Prod if not set in .env
-const PAKASIR_BASE_URL = process.env.PAKASIR_API_URL || 'https://app.pakasir.com/api';
+const midtransClient = require('midtrans-client');
+const crypto = require('crypto');
+
+// --- MIDTRANS CONFIG ---
+const coreApi = new midtransClient.CoreApi({
+    isProduction: process.env.MIDTRANS_IS_PRODUCTION === 'true',
+    serverKey: process.env.MIDTRANS_SERVER_KEY,
+    clientKey: process.env.MIDTRANS_CLIENT_KEY
+});
 
 // Helper to check status
-const fetchTransactionStatus = async (orderId, amount) => {
-    const url = `${PAKASIR_BASE_URL}/transactiondetail?project=${PAKASIR_PROJECT}&amount=${amount}&order_id=${orderId}&api_key=${PAKASIR_API_KEY}`;
-    const response = await fetch(url);
-    return await response.json();
+const fetchTransactionStatus = async (orderId) => {
+    try {
+        const statusResponse = await coreApi.transaction.status(orderId);
+        return statusResponse;
+    } catch (e) {
+        console.error("Midtrans status check error", e.message);
+        return null; // Might be not found yet
+    }
 };
 
 const isSuccessStatus = (status) => {
     if (!status) return false;
     const s = status.toLowerCase();
-    return s === 'success' || s === 'settlement' || s === 'completed';
+    return s === 'success' || s === 'settlement' || s === 'capture';
 };
 
 // 1. Create Transaction (Get QR Data)
@@ -28,13 +36,8 @@ const createTransaction = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Missing orderId or amount' });
     }
 
-    if (!PAKASIR_PROJECT) {
-        console.error("❌ PAKASIR_PROJECT_SLUG is not set in .env");
-        return res.status(500).json({ success: false, message: 'Server Config Error' });
-    }
-
     try {
-        console.log(`[Pakasir] Start Transaction: Order ${orderId}, Amount: ${amount}`);
+        console.log(`[Midtrans] Start Transaction: Order ${orderId}, Amount: ${amount}`);
 
         // 1. Cek DB dulu
         const order = await prisma.order.findUnique({ where: { transactionCode: orderId.toString() } });
@@ -42,154 +45,132 @@ const createTransaction = async (req, res) => {
             return res.json({ success: true, status: 'Paid', message: 'Order already paid' });
         }
 
-        const payload = {
-            project: PAKASIR_PROJECT,
-            order_id: orderId.toString(),
-            amount: amount,
-            api_key: PAKASIR_API_KEY
+        const parameter = {
+            "payment_type": "qris",
+            "transaction_details": {
+                "order_id": orderId.toString(),
+                "gross_amount": Math.round(amount)
+            },
+            "custom_expiry": {
+                "order_time": new Date().toISOString().replace('T', ' ').substring(0, 19) + " +0000",
+                "expiry_duration": 15,
+                "unit": "minute"
+            }
         };
 
-        const response = await fetch(`${PAKASIR_BASE_URL}/transactioncreate/qris`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
+        const chargeResponse = await coreApi.charge(parameter);
+        if (process.env.NODE_ENV !== 'production') console.log("[Midtrans] Core API Response:", chargeResponse);
 
-        const text = await response.text();
-        if (process.env.NODE_ENV !== 'production') console.log("[Pakasir] Raw API Response:", text);
+        // Midtrans GoPay/QRIS will return actions
+        if (chargeResponse.status_code == '201') {
+            let qrUrl = null;
+            if (chargeResponse.actions && chargeResponse.actions.length > 0) {
+                // Find action with name "generate-qr-code"
+                const qrAction = chargeResponse.actions.find(a => a.name === 'generate-qr-code');
+                if (qrAction) qrUrl = qrAction.url;
+            }
 
-        let result;
-        try {
-            result = JSON.parse(text);
-        } catch (e) {
-            console.error("[Pakasir] JSON Parse Error:", e);
-            throw new Error("Invalid JSON from Pakasir");
-        }
-
-        // --- HANDLING SUKSES CREATION ---
-        if (result.payment && result.payment.payment_number) {
             return res.json({
                 success: true,
                 data: {
-                    qrString: result.payment.payment_number,
-                    amount: result.payment.total_payment || amount,
-                    orderId: result.payment.order_id,
-                    expiry: result.payment.expired_at
+                    qrString: qrUrl, // We map the URL to qrString for the frontend
+                    amount: chargeResponse.gross_amount,
+                    orderId: chargeResponse.order_id,
+                    expiry: chargeResponse.expiry_time
                 }
             });
         }
 
-        // --- HANDLING "ALREADY COMPLETED" ---
-        if (result.message && result.message.toLowerCase().includes("completed")) {
-            console.log("[Pakasir] Transaction exists/completed. Checking status...");
-            const check = await fetchTransactionStatus(orderId, amount);
-            console.log("[Pakasir] Re-check Status:", JSON.stringify(check));
+        // --- HANDLING "ALREADY COMPLETED" or other errors ---
+        if (chargeResponse.status_code == '406' || chargeResponse.status_code == '409') {
+            // Already created, check status
+            console.log("[Midtrans] Transaction exists. Checking status...");
+            const check = await fetchTransactionStatus(orderId.toString());
 
-            if (check.transaction && isSuccessStatus(check.transaction.status)) {
+            if (check && isSuccessStatus(check.transaction_status)) {
                 if (order && order.paymentStatus !== 'Paid') {
-                    // Fix: Update Status to Pending if it was WaitingPayment
                     const newStatus = order.status === 'WaitingPayment' ? 'Pending' : order.status;
 
                     const updatedOrder = await prisma.order.update({
                         where: { transactionCode: orderId.toString() },
-                        data: {
-                            paymentStatus: 'Paid',
-                            status: newStatus
-                        },
-                        include: {
-                            table: { include: { location: true } },
-                            items: { include: { product: true } }
-                        }
+                        data: { paymentStatus: 'Paid', status: newStatus },
+                        include: { table: { include: { location: true } }, items: { include: { product: true } } }
                     });
 
                     // EMIT SOCKET UPDATE
                     if (req.io) {
-                        // 1. Update existing listeners
-                        req.io.emit('order_update', {
-                            transactionCode: orderId.toString(),
-                            status: 'Paid',
-                            source: 'create-check'
-                        });
-                        req.io.to(orderId.toString()).emit('order_update', {
-                            transactionCode: orderId.toString(),
-                            status: 'Paid',
-                            source: 'create-check-direct'
-                        });
+                        req.io.emit('order_update', { transactionCode: orderId.toString(), status: 'Paid', source: 'create-check' });
+                        req.io.to(orderId.toString()).emit('order_update', { transactionCode: orderId.toString(), status: 'Paid', source: 'create-check-direct' });
 
-                        // 2. EMIT NEW ORDER (Crucial for Kasir Dashboard if it was hidden)
                         if (order.status === 'WaitingPayment') {
                             req.io.emit('new_order', updatedOrder);
                             if (updatedOrder.storeId) {
                                 req.io.to(`store_${updatedOrder.storeId}`).emit('new_order', updatedOrder);
                             }
-                            console.log(`📡 'new_order' Emitted for ${orderId} (Recovery)`);
                         }
                     }
                 }
-
                 return res.json({ success: true, status: 'Paid', message: 'Transaction verified as Paid' });
-            } else {
+            } else if (check) {
                 return res.json({ success: true, status: 'Pending', message: 'Transaction exists but pending' });
             }
         }
 
-        console.error("[Pakasir] Failed:", result);
-        res.status(400).json({
-            success: false,
-            message: result.message || 'Gagal membuat QRIS',
-            details: result
-        });
-
+        throw new Error(chargeResponse.status_message || "Gagal dari Midtrans");
     } catch (error) {
-        console.error("[Pakasir] Create Error:", error);
-        res.status(500).json({ success: false, message: "Internal Server Error" });
+        console.error("[Midtrans] Create Error:", error.message || error);
+        res.status(500).json({ success: false, message: error.message || "Internal Server Error" });
     }
 };
 
 // 2. Webhook Handler (Instant Notification)
 const handleCallback = async (req, res) => {
     try {
-        // DEBUG: Sanitized Log
-        const { order_id, status } = req.body;
-        console.log(`[Pakasir] Webhook Hit for Order: ${order_id}, Status: ${status}`);
+        const notificationData = req.body;
+        
+        // Midtrans Native Authentication
+        const serverKey = process.env.MIDTRANS_SERVER_KEY;
+        const hash = crypto.createHash('sha512').update(
+            notificationData.order_id + notificationData.status_code + notificationData.gross_amount + serverKey
+        ).digest('hex');
 
-        // Payload: { project, order_id, amount, status, ... }
+        if (notificationData.signature_key !== hash) {
+            console.error("Invalid Midtrans Signature!");
+            return res.status(403).json({ status: 'error', message: "Invalid Signature" });
+        }
 
+        const transactionStatus = notificationData.transaction_status;
+        const fraudStatus = notificationData.fraud_status;
+        const order_id = notificationData.order_id;
 
-        if (isSuccessStatus(status)) {
+        console.log(`[Midtrans] Webhook Hit for Order: ${order_id}, Status: ${transactionStatus}`);
+
+        if (transactionStatus == 'capture' || transactionStatus == 'settlement' || transactionStatus == 'success') {
+            if (transactionStatus == 'capture' && fraudStatus == 'challenge') {
+                return res.status(200).json({ status: 'ok', message: 'Challenge ignored' });
+            }
+
             const order = await prisma.order.findUnique({ where: { transactionCode: order_id.toString() } });
 
             if (order) {
                 if (order.paymentStatus !== 'Paid') {
-                    // Update Payment AND Status if needed
                     const newStatus = order.status === 'WaitingPayment' ? 'Pending' : order.status;
 
-                    // TAHAP 47: ONE TRUE QUEUE FIX
-                    // Jika pesanan asalnya WaitingPayment (belum punya QueueNumber), kita buatkan nomor antrean SEKARANG.
                     let generatedQueueNumber = order.queueNumber;
                     if (order.status === 'WaitingPayment' && (!order.queueNumber || order.queueNumber === 0)) {
-                        // TAHAP 48 Hotfix 3: Webhook Timezone Sync
                         const parts = new Intl.DateTimeFormat('en-US', {
-                            timeZone: 'Asia/Jakarta',
-                            year: 'numeric', month: 'numeric', day: 'numeric'
+                            timeZone: 'Asia/Jakarta', year: 'numeric', month: 'numeric', day: 'numeric'
                         }).formatToParts(new Date());
 
                         const wib = {};
                         parts.forEach(p => wib[p.type] = p.value);
                         const todayStart = new Date(Date.UTC(wib.year, wib.month - 1, wib.day, -7, 0, 0, 0));
 
-                        // TAHAP 49: NEW QUEUE PHILOSOPHY (Active Pending Count)
-                        const whereQueue = {
-                            status: { in: ['Pending', 'Processing'] }
-                        };
+                        const whereQueue = { status: { in: ['Pending', 'Processing'] } };
                         if (order.storeId) whereQueue.storeId = order.storeId;
                         whereQueue.createdAt = { gte: todayStart };
 
-                        const activeQueueCount = await prisma.order.count({
-                            where: whereQueue
-                        });
-
-                        // Queue number is strictly live waiting people + 1
+                        const activeQueueCount = await prisma.order.count({ where: whereQueue });
                         generatedQueueNumber = activeQueueCount + 1;
                     }
 
@@ -198,54 +179,35 @@ const handleCallback = async (req, res) => {
                         data: {
                             paymentStatus: 'Paid',
                             status: newStatus,
-                            queueNumber: generatedQueueNumber // Assign new number if it was waiting
+                            queueNumber: generatedQueueNumber
                         },
-                        include: {
-                            table: { include: { location: true } },
-                            items: { include: { product: true } }
-                        }
+                        include: { table: { include: { location: true } }, items: { include: { product: true } } }
                     });
-                    console.log(`[Pakasir] Order ${order_id} UPDATED to Paid (Queue: ${generatedQueueNumber}) (via Webhook)`);
 
                     // EMIT NEW ORDER if it was waiting
                     if (req.io) {
-                        // Emit update first
-                        // 1. GLOBAL (Backup)
-                        req.io.emit('order_update', {
-                            transactionCode: order_id,
-                            status: 'Paid',
-                            source: 'webhook'
-                        });
+                        req.io.emit('order_update', { transactionCode: order_id, status: 'Paid', source: 'webhook' });
+                        req.io.to(order_id).emit('order_update', { transactionCode: order_id, status: 'Paid', source: 'webhook_direct' });
 
-                        // 2. SPECIFIC ROOM (Primary for Instant Redirect)
-                        req.io.to(order_id).emit('order_update', {
-                            transactionCode: order_id,
-                            status: 'Paid',
-                            source: 'webhook_direct'
-                        });
-
-                        // If it was 'WaitingPayment', now treat it as 'new_order' for Kasir
                         if (order.status === 'WaitingPayment') {
                             req.io.emit('new_order', updatedOrder);
                             if (updatedOrder.storeId) {
                                 req.io.to(`store_${updatedOrder.storeId}`).emit('new_order', updatedOrder);
                             }
-                            console.log(`📡 Delayed 'new_order' Emitted for ${order_id}`);
                         }
                     }
                 }
                 return res.status(200).json({ status: 'ok', message: 'Updated to Paid' });
             } else {
-                console.log(`[Pakasir] Order ${order_id} not found in DB`);
                 return res.status(200).json({ status: 'ok', message: 'Order not found' });
             }
         }
 
-        console.log(`[Pakasir] Webhook ignored (Status: ${status})`);
+        console.log(`[Midtrans] Webhook ignored (Status: ${transactionStatus})`);
         res.status(200).json({ status: 'ok', message: 'Ignored' });
 
     } catch (error) {
-        console.error("[Pakasir] Webhook Error:", error);
+        console.error("[Midtrans] Webhook Error:", error);
         res.status(200).json({ status: 'error', message: "Internal Error handled" });
     }
 };
@@ -253,66 +215,46 @@ const handleCallback = async (req, res) => {
 // 3. Status Polling Backup
 const checkStatus = async (req, res) => {
     const { orderId } = req.params;
-    const { amount } = req.query;
 
-    if (!orderId || !amount) return res.status(400).json({ message: 'Missing params' });
+    if (!orderId) return res.status(400).json({ message: 'Missing params' });
 
     try {
-        // OPTIMIZATION: Check Local DB First!
-        // Prevents race condition where Webhook updates DB but External API is lagging
         const localOrder = await prisma.order.findUnique({ where: { transactionCode: orderId } });
 
         if (localOrder && localOrder.paymentStatus === 'Paid') {
             return res.json({ success: true, status: 'Paid', message: 'Verified from Local DB' });
         }
 
-        // Fallback: Check External API (Pakasir)
-        const result = await fetchTransactionStatus(orderId, amount);
+        const result = await fetchTransactionStatus(orderId);
 
-        if (result.transaction && isSuccessStatus(result.transaction.status)) {
+        if (result && isSuccessStatus(result.transaction_status)) {
             const order = localOrder || await prisma.order.findUnique({ where: { transactionCode: orderId } });
 
             if (order && order.paymentStatus !== 'Paid') {
                 const newStatus = order.status === 'WaitingPayment' ? 'Pending' : order.status;
 
-                // TAHAP 47: ONE TRUE QUEUE FIX (Polling Fallback)
                 let generatedQueueNumber = order.queueNumber;
                 if (order.status === 'WaitingPayment' && (!order.queueNumber || order.queueNumber === 0)) {
-                    // TAHAP 48 Hotfix 3: Webhook Polling Timezone Sync
                     const parts = new Intl.DateTimeFormat('en-US', {
-                        timeZone: 'Asia/Jakarta',
-                        year: 'numeric', month: 'numeric', day: 'numeric'
+                        timeZone: 'Asia/Jakarta', year: 'numeric', month: 'numeric', day: 'numeric'
                     }).formatToParts(new Date());
 
                     const wib = {};
                     parts.forEach(p => wib[p.type] = p.value);
                     const todayStart = new Date(Date.UTC(wib.year, wib.month - 1, wib.day, -7, 0, 0, 0));
 
-                    // TAHAP 49: NEW QUEUE PHILOSOPHY (Active Pending Count)
-                    const whereQueue = {
-                        status: { in: ['Pending', 'Processing'] }
-                    };
+                    const whereQueue = { status: { in: ['Pending', 'Processing'] } };
                     if (order.storeId) whereQueue.storeId = order.storeId;
                     whereQueue.createdAt = { gte: todayStart };
 
-                    const activeQueueCount = await prisma.order.count({
-                        where: whereQueue
-                    });
-
+                    const activeQueueCount = await prisma.order.count({ where: whereQueue });
                     generatedQueueNumber = activeQueueCount + 1;
                 }
 
                 const updatedOrder = await prisma.order.update({
                     where: { transactionCode: orderId },
-                    data: {
-                        paymentStatus: 'Paid',
-                        status: newStatus,
-                        queueNumber: generatedQueueNumber
-                    },
-                    include: {
-                        table: { include: { location: true } },
-                        items: { include: { product: true } }
-                    }
+                    data: { paymentStatus: 'Paid', status: newStatus, queueNumber: generatedQueueNumber },
+                    include: { table: { include: { location: true } }, items: { include: { product: true } } }
                 });
 
                 if (req.io) {
@@ -326,15 +268,14 @@ const checkStatus = async (req, res) => {
                         }
                     }
                 }
-                console.log(`[Pakasir] Polling found PAID status for ${orderId}`);
             }
             return res.json({ success: true, status: 'Paid' });
         }
 
-        res.json({ success: true, status: 'Pending', raw_status: result.transaction?.status });
+        res.json({ success: true, status: 'Pending', raw_status: result?.transaction_status });
 
     } catch (error) {
-        console.error("[Pakasir] Check Status Error:", error);
+        console.error("[Midtrans] Check Status Error:", error);
         res.status(500).json({ success: false });
     }
 };
@@ -344,28 +285,28 @@ const expireOrder = async (req, res) => {
     try {
         const { orderId } = req.body;
 
-        const order = await prisma.order.findUnique({ where: { transactionCode: orderId } });
+        const order = await prisma.order.findUnique({ where: { transactionCode: orderId.toString() } });
         if (!order) return res.status(404).json({ message: 'Order not found' });
 
-        // Safety Check: Don't cancel paid orders
         if (order.paymentStatus === 'Paid') {
             return res.json({ success: false, message: 'Order already Paid' });
         }
 
-        // Only cancel if it's waiting for payment
+        try {
+            await coreApi.transaction.cancel(orderId.toString());
+        } catch(e) {
+            console.error("Cancel Midtrans failed, might already be canceled", e.message);
+        }
+
         if (order.status !== 'WaitingPayment') {
             return res.json({ success: false, message: 'Order status is not valid for expiry' });
         }
 
         await prisma.order.update({
-            where: { transactionCode: orderId },
-            data: {
-                status: 'Cancelled',
-                paymentStatus: 'Expired'
-            }
+            where: { transactionCode: orderId.toString() },
+            data: { status: 'Cancelled', paymentStatus: 'Expired' }
         });
 
-        console.log(`Order ${orderId} marked as EXPIRED (Timer Timeout)`);
         res.json({ success: true, message: 'Order expired successfully' });
 
     } catch (error) {
