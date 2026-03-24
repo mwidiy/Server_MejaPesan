@@ -17,6 +17,9 @@ const productRoutes = require('./routes/productRoutes');
 const bannerRoutes = require('./routes/bannerRoutes');
 
 const app = express();
+// NEW: Trust first proxy to allow express-rate-limit to extract real client IP 
+app.set('trust proxy', 1); 
+
 const compression = require('compression'); // NEW: GZIP Compression
 app.use(compression()); // Compress all routes!
 
