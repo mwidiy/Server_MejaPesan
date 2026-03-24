@@ -86,36 +86,49 @@ const createTransaction = async (req, res) => {
             return res.json({ success: true, status: 'Paid', message: 'Order already paid' });
         }
 
-        // --- CUSTOM PG UNIQUE CODE LOGIC ---
-        let finalAmount = Math.round(amount);
+        // --- CUSTOM PG UNIQUE CODE LOGIC (SMART SEQUENTIAL) ---
+        let baseAmount = Math.round(amount);
+        let finalAmount = baseAmount;
         let shouldGenerateNew = true;
         
-        // Prevent re-generating unique code on refresh
-        if (order.totalAmount !== Math.round(amount) && order.totalAmount > amount && (order.totalAmount - amount) <= 999) {
+        // Prevent re-generating unique code on refresh for the SAME order
+        if (order.totalAmount > baseAmount && (order.totalAmount - baseAmount) <= 999) {
             finalAmount = order.totalAmount;
             shouldGenerateNew = false;
         }
 
         if (shouldGenerateNew) {
-            let isUnique = false;
-            let attempts = 0;
-            while(!isUnique && attempts < 100) {
-                let uniqueCode = Math.floor(Math.random() * 999) + 1;
-                finalAmount = Math.round(amount) + uniqueCode;
-                
-                const existing = await prisma.order.findFirst({
-                    where: {
-                        totalAmount: finalAmount,
-                        paymentStatus: 'Unpaid',
-                        status: { in: ['WaitingPayment', 'Pending'] }
-                    }
-                });
-                
-                if (!existing || existing.transactionCode === orderId.toString()) {
-                    isUnique = true;
+            // 6 minutes expiration rule
+            const sixMinutesAgo = new Date(Date.now() - 6 * 60 * 1000);
+
+            // Fetch all UNPAID orders with the same base amount configured within the last 6 mins
+            const activeSimilarOrders = await prisma.order.findMany({
+                where: {
+                    totalAmount: {
+                        gte: baseAmount + 1,
+                        lte: baseAmount + 999
+                    },
+                    paymentStatus: 'Unpaid',
+                    status: { in: ['WaitingPayment', 'Pending'] },
+                    createdAt: { gte: sixMinutesAgo },
+                    transactionCode: { not: orderId.toString() } // exclude self
+                },
+                select: { totalAmount: true }
+            });
+
+            // Extract used codes into a Set for O(1) lookup
+            const usedCodes = new Set(activeSimilarOrders.map(o => o.totalAmount - baseAmount));
+
+            // Find the smallest available code starting from 1
+            let uniqueCode = 1;
+            while (usedCodes.has(uniqueCode)) {
+                uniqueCode++;
+                if (uniqueCode > 999) {
+                    throw new Error("Antrean pembayaran penuh, coba lagi dalam beberapa menit.");
                 }
-                attempts++;
             }
+            
+            finalAmount = baseAmount + uniqueCode;
             
             await prisma.order.update({
                 where: { id: order.id },
