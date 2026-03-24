@@ -502,7 +502,7 @@ const getOrderByTransactionCode = async (req, res) => {
                 table: {
                     include: { location: true }
                 },
-                store: { select: { whatsappNumber: true } }
+                store: { select: { whatsappNumber: true, isKasirQrVerificationEnabled: true } }
             }
         });
 
