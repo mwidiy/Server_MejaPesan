@@ -53,6 +53,9 @@ model Store {
   ewalletType     String?   // Fixed: "ShopeePay"
   ewalletNumber   String?
   ewalletName     String?
+
+  // Feature Flags
+  isKasirQrVerificationEnabled Boolean @default(false)
 }
 
 model Withdrawal {

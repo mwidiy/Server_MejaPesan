@@ -42,7 +42,7 @@ const getStore = async (req, res) => {
 // Update Info
 const updateStore = async (req, res) => {
     try {
-        const { name, isOpen, bankName, bankNumber, bankHolder, ewalletType, ewalletNumber, ewalletName, whatsappNumber } = req.body;
+        const { name, isOpen, bankName, bankNumber, bankHolder, ewalletType, ewalletNumber, ewalletName, whatsappNumber, isKasirQrVerificationEnabled } = req.body;
         if (!req.storeId) return res.status(400).json({ error: 'User tidak memiliki akses Toko' });
 
         // --- HARDENING: SERVER-SIDE VALIDATION & SANITIZATION ---
@@ -94,7 +94,8 @@ const updateStore = async (req, res) => {
                 ewalletType,
                 ewalletNumber,
                 ewalletName,
-                whatsappNumber
+                whatsappNumber,
+                isKasirQrVerificationEnabled: isKasirQrVerificationEnabled === 'true' || isKasirQrVerificationEnabled === true ? true : (isKasirQrVerificationEnabled === 'false' || isKasirQrVerificationEnabled === false ? false : undefined)
             }
         });
 
