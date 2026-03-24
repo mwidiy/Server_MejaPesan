@@ -46,7 +46,7 @@ const createTransaction = async (req, res) => {
         }
 
         const parameter = {
-            "payment_type": "qris",
+            "payment_type": "gopay",
             "transaction_details": {
                 "order_id": orderId.toString(),
                 "gross_amount": Math.round(amount)
