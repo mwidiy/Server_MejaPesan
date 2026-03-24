@@ -28,6 +28,47 @@ const isSuccessStatus = (status) => {
     return s === 'success' || s === 'settlement' || s === 'capture';
 };
 
+// --- CUSTOM DYNAMIC QRIS ENGINE ---
+function calculateCrc16(str) {
+    let crc = 0xFFFF;
+    for (let c = 0; c < str.length; c++) {
+        crc ^= str.charCodeAt(c) << 8;
+        for (let i = 0; i < 8; i++) {
+            if (crc & 0x8000) {
+                crc = (crc << 1) ^ 0x1021;
+            } else {
+                crc = crc << 1;
+            }
+        }
+    }
+    return (crc & 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
+}
+
+function generateDynamicQris(rawQris, newAmount) {
+    let crcTagIndex = rawQris.lastIndexOf("6304");
+    if (crcTagIndex === -1) throw new Error("Tag 6304 not found");
+    let i = 0;
+    let modifiedStr = "";
+    while (i < crcTagIndex) {
+        let tag = rawQris.substring(i, i + 2);
+        let lenStr = rawQris.substring(i + 2, i + 4);
+        let len = parseInt(lenStr, 10);
+        let val = rawQris.substring(i + 4, i + 4 + len);
+        if (tag === "54") {
+            let newAmtStr = Math.round(newAmount).toString();
+            let newLenStr = newAmtStr.length.toString().padStart(2, '0');
+            modifiedStr += "54" + newLenStr + newAmtStr;
+        } else {
+            modifiedStr += tag + lenStr + val;
+        }
+        i += 4 + len;
+    }
+    modifiedStr += "6304";
+    return modifiedStr + calculateCrc16(modifiedStr);
+}
+
+const RAW_STATIC_QRIS = "00020101021226610014COM.GO-JEK.WWW01189360091439559600780210G9559600780303UMI51440014ID.CO.QRIS.WWW0215ID10254109926280303UMI52048999530336054035005802ID5925MUHAMAD WIDIYANTO, Digita6008PEMALANG61055235362395028A220260324100645wuMapYJP3NID0703A016304A734";
+
 // 1. Create Transaction (Get QR Data)
 const createTransaction = async (req, res) => {
     const { orderId, amount } = req.body;
@@ -37,88 +78,64 @@ const createTransaction = async (req, res) => {
     }
 
     try {
-        console.log(`[Midtrans] Start Transaction: Order ${orderId}, Amount: ${amount}`);
-
-        // 1. Cek DB dulu
         const order = await prisma.order.findUnique({ where: { transactionCode: orderId.toString() } });
         if (order && order.paymentStatus === 'Paid') {
             return res.json({ success: true, status: 'Paid', message: 'Order already paid' });
         }
 
-        const parameter = {
-            "payment_type": "gopay",
-            "transaction_details": {
-                "order_id": orderId.toString(),
-                "gross_amount": Math.round(amount)
-            },
-            "custom_expiry": {
-                "order_time": new Date().toISOString().replace('T', ' ').substring(0, 19) + " +0000",
-                "expiry_duration": 15,
-                "unit": "minute"
-            }
-        };
+        // --- CUSTOM PG UNIQUE CODE LOGIC ---
+        let finalAmount = Math.round(amount);
+        let shouldGenerateNew = true;
+        
+        // Prevent re-generating unique code on refresh
+        if (order.totalAmount !== Math.round(amount) && order.totalAmount > amount && (order.totalAmount - amount) <= 999) {
+            finalAmount = order.totalAmount;
+            shouldGenerateNew = false;
+        }
 
-        const chargeResponse = await coreApi.charge(parameter);
-        if (process.env.NODE_ENV !== 'production') console.log("[Midtrans] Core API Response:", chargeResponse);
-
-        // Midtrans GoPay/QRIS will return actions
-        if (chargeResponse.status_code == '201') {
-            let qrUrl = null;
-            if (chargeResponse.actions && chargeResponse.actions.length > 0) {
-                // Find action with name "generate-qr-code"
-                const qrAction = chargeResponse.actions.find(a => a.name === 'generate-qr-code');
-                if (qrAction) qrUrl = qrAction.url;
-            }
-
-            return res.json({
-                success: true,
-                data: {
-                    qrString: qrUrl, // We map the URL to qrString for the frontend
-                    amount: chargeResponse.gross_amount,
-                    orderId: chargeResponse.order_id,
-                    expiry: chargeResponse.expiry_time
+        if (shouldGenerateNew) {
+            let isUnique = false;
+            let attempts = 0;
+            while(!isUnique && attempts < 100) {
+                let uniqueCode = Math.floor(Math.random() * 999) + 1;
+                finalAmount = Math.round(amount) + uniqueCode;
+                
+                const existing = await prisma.order.findFirst({
+                    where: {
+                        totalAmount: finalAmount,
+                        paymentStatus: 'Unpaid',
+                        status: { in: ['WaitingPayment', 'Pending'] }
+                    }
+                });
+                
+                if (!existing || existing.transactionCode === orderId.toString()) {
+                    isUnique = true;
                 }
+                attempts++;
+            }
+            
+            await prisma.order.update({
+                where: { id: order.id },
+                data: { totalAmount: finalAmount }
             });
         }
 
-        // --- HANDLING "ALREADY COMPLETED" or other errors ---
-        if (chargeResponse.status_code == '406' || chargeResponse.status_code == '409') {
-            // Already created, check status
-            console.log("[Midtrans] Transaction exists. Checking status...");
-            const check = await fetchTransactionStatus(orderId.toString());
+        // --- GENERATE DYNAMIC QRIS STRING ---
+        let dynamicQrisString = generateDynamicQris(RAW_STATIC_QRIS, finalAmount);
+        console.log(`[Custom PG] Generated QRIS for Order ${orderId} | Nominal: Rp ${finalAmount}`);
 
-            if (check && isSuccessStatus(check.transaction_status)) {
-                if (order && order.paymentStatus !== 'Paid') {
-                    const newStatus = order.status === 'WaitingPayment' ? 'Pending' : order.status;
-
-                    const updatedOrder = await prisma.order.update({
-                        where: { transactionCode: orderId.toString() },
-                        data: { paymentStatus: 'Paid', status: newStatus },
-                        include: { table: { include: { location: true } }, items: { include: { product: true } } }
-                    });
-
-                    // EMIT SOCKET UPDATE
-                    if (req.io) {
-                        req.io.emit('order_update', { transactionCode: orderId.toString(), status: 'Paid', source: 'create-check' });
-                        req.io.to(orderId.toString()).emit('order_update', { transactionCode: orderId.toString(), status: 'Paid', source: 'create-check-direct' });
-
-                        if (order.status === 'WaitingPayment') {
-                            req.io.emit('new_order', updatedOrder);
-                            if (updatedOrder.storeId) {
-                                req.io.to(`store_${updatedOrder.storeId}`).emit('new_order', updatedOrder);
-                            }
-                        }
-                    }
-                }
-                return res.json({ success: true, status: 'Paid', message: 'Transaction verified as Paid' });
-            } else if (check) {
-                return res.json({ success: true, status: 'Pending', message: 'Transaction exists but pending' });
+        return res.json({
+            success: true,
+            data: {
+                qrString: dynamicQrisString, 
+                amount: finalAmount,
+                orderId: orderId,
+                expiry: new Date(Date.now() + 10 * 60000).toISOString()
             }
-        }
+        });
 
-        throw new Error(chargeResponse.status_message || "Gagal dari Midtrans");
     } catch (error) {
-        console.error("[Midtrans] Create Error:", error.message || error);
+        console.error("[Custom PG] Create Error:", error.message || error);
         res.status(500).json({ success: false, message: error.message || "Internal Server Error" });
     }
 };
@@ -126,37 +143,37 @@ const createTransaction = async (req, res) => {
 // 2. Webhook Handler (Instant Notification)
 const handleCallback = async (req, res) => {
     try {
-        const notificationData = req.body;
+        const payload = req.body;
         
-        // Midtrans Native Authentication
-        const serverKey = process.env.MIDTRANS_SERVER_KEY;
-        const hash = crypto.createHash('sha512').update(
-            notificationData.order_id + notificationData.status_code + notificationData.gross_amount + serverKey
-        ).digest('hex');
+        // --- CUSTOM PG WEBHOOK MATCHING ---
+        if (payload.app_sumber && payload.isi_pesan && payload.isi_pesan.toLowerCase().includes("pembayaran")) {
+            console.log(`[Custom PG Webhook] Incoming:`, payload.isi_pesan);
+            
+            // Extract Amount (e.g., "Rp 15.012")
+            const match = payload.isi_pesan.match(/Rp\s*([\d.,]+)/i);
+            
+            if (match) {
+                const rawAmountStr = match[1].replace(/\./g, '').replace(/,/g, '');
+                const exactAmount = parseInt(rawAmountStr, 10);
+                console.log(`[Custom PG Webhook] Extracted Amount: Rp ${exactAmount}`);
+                
+                // Find order matching exact nominal
+                const order = await prisma.order.findFirst({
+                    where: {
+                        totalAmount: exactAmount,
+                        paymentStatus: 'Unpaid',
+                        status: { in: ['WaitingPayment', 'Pending'] }
+                    },
+                    orderBy: { createdAt: 'desc' },
+                    include: { table: { include: { location: true } }, items: { include: { product: true } } }
+                });
 
-        if (notificationData.signature_key !== hash) {
-            console.error("Invalid Midtrans Signature!");
-            return res.status(403).json({ status: 'error', message: "Invalid Signature" });
-        }
-
-        const transactionStatus = notificationData.transaction_status;
-        const fraudStatus = notificationData.fraud_status;
-        const order_id = notificationData.order_id;
-
-        console.log(`[Midtrans] Webhook Hit for Order: ${order_id}, Status: ${transactionStatus}`);
-
-        if (transactionStatus == 'capture' || transactionStatus == 'settlement' || transactionStatus == 'success') {
-            if (transactionStatus == 'capture' && fraudStatus == 'challenge') {
-                return res.status(200).json({ status: 'ok', message: 'Challenge ignored' });
-            }
-
-            const order = await prisma.order.findUnique({ where: { transactionCode: order_id.toString() } });
-
-            if (order) {
-                if (order.paymentStatus !== 'Paid') {
+                if (order) {
+                    console.log(`[Custom PG Webhook] MATCHED Order: ${order.transactionCode}`);
+                    
                     const newStatus = order.status === 'WaitingPayment' ? 'Pending' : order.status;
-
                     let generatedQueueNumber = order.queueNumber;
+
                     if (order.status === 'WaitingPayment' && (!order.queueNumber || order.queueNumber === 0)) {
                         const parts = new Intl.DateTimeFormat('en-US', {
                             timeZone: 'Asia/Jakarta', year: 'numeric', month: 'numeric', day: 'numeric'
@@ -175,7 +192,7 @@ const handleCallback = async (req, res) => {
                     }
 
                     const updatedOrder = await prisma.order.update({
-                        where: { transactionCode: order_id.toString() },
+                        where: { id: order.id },
                         data: {
                             paymentStatus: 'Paid',
                             status: newStatus,
@@ -184,10 +201,10 @@ const handleCallback = async (req, res) => {
                         include: { table: { include: { location: true } }, items: { include: { product: true } } }
                     });
 
-                    // EMIT NEW ORDER if it was waiting
+                    // Emit Realtime Sockets
                     if (req.io) {
-                        req.io.emit('order_update', { transactionCode: order_id, status: 'Paid', source: 'webhook' });
-                        req.io.to(order_id).emit('order_update', { transactionCode: order_id, status: 'Paid', source: 'webhook_direct' });
+                        req.io.emit('order_update', { transactionCode: order.transactionCode, status: 'Paid', source: 'webhook-custom' });
+                        req.io.to(order.transactionCode).emit('order_update', { transactionCode: order.transactionCode, status: 'Paid', source: 'webhook-custom-direct' });
 
                         if (order.status === 'WaitingPayment') {
                             req.io.emit('new_order', updatedOrder);
@@ -196,19 +213,20 @@ const handleCallback = async (req, res) => {
                             }
                         }
                     }
+                    return res.status(200).json({ status: 'ok', message: 'Order Paid via Custom PG' });
+                } else {
+                    console.error(`[Custom PG Webhook] NO MATCH for amount: Rp ${exactAmount}`);
+                    return res.status(200).json({ status: 'ignored', message: 'No order matched this nominal' });
                 }
-                return res.status(200).json({ status: 'ok', message: 'Updated to Paid' });
-            } else {
-                return res.status(200).json({ status: 'ok', message: 'Order not found' });
             }
         }
 
-        console.log(`[Midtrans] Webhook ignored (Status: ${transactionStatus})`);
-        res.status(200).json({ status: 'ok', message: 'Ignored' });
+        // Midtrans Fallback (Ignored for Custom PG POC)
+        res.status(200).json({ status: 'ok', message: 'Ignored payload' });
 
     } catch (error) {
-        console.error("[Midtrans] Webhook Error:", error);
-        res.status(200).json({ status: 'error', message: "Internal Error handled" });
+        console.error("[Custom PG] Webhook Error:", error);
+        res.status(500).json({ status: 'error', message: "Internal Error" });
     }
 };
 
