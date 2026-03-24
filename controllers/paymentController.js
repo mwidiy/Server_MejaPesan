@@ -44,30 +44,33 @@ function calculateCrc16(str) {
     return (crc & 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
 }
 
-function generateDynamicQris(rawQris, newAmount) {
-    let crcTagIndex = rawQris.lastIndexOf("6304");
-    if (crcTagIndex === -1) throw new Error("Tag 6304 not found");
-    let i = 0;
-    let modifiedStr = "";
-    while (i < crcTagIndex) {
-        let tag = rawQris.substring(i, i + 2);
-        let lenStr = rawQris.substring(i + 2, i + 4);
-        let len = parseInt(lenStr, 10);
-        let val = rawQris.substring(i + 4, i + 4 + len);
-        if (tag === "54") {
-            let newAmtStr = Math.round(newAmount).toString();
-            let newLenStr = newAmtStr.length.toString().padStart(2, '0');
-            modifiedStr += "54" + newLenStr + newAmtStr;
-        } else {
-            modifiedStr += tag + lenStr + val;
-        }
-        i += 4 + len;
+function generateDynamicQris(staticQR, amount) {
+    // 1. Change POI Method (Static to Dynamic)
+    let modifiedStr = staticQR.replace("010211", "010212");
+
+    // 2. Inject the Transaction Amount (Tag 54)
+    let newAmtStr = Math.round(amount).toString();
+    let newLenStr = newAmtStr.length.toString().padStart(2, '0');
+    let tag54Payload = "54" + newLenStr + newAmtStr;
+    
+    if (!modifiedStr.includes("5303360")) {
+        throw new Error("Tag 53 for Currency IDR (5303360) not found in the static QRIS");
     }
-    modifiedStr += "6304";
-    return modifiedStr + calculateCrc16(modifiedStr);
+    modifiedStr = modifiedStr.replace("5303360", "5303360" + tag54Payload);
+
+    // 3. Prepare String for CRC Calculation
+    let crcTagIndex = modifiedStr.lastIndexOf("6304");
+    if (crcTagIndex === -1) {
+        throw new Error("CRC tag 6304 not found");
+    }
+    let strForCrc = modifiedStr.slice(0, crcTagIndex + 4);
+
+    // 4 & 5. Calculate New CRC16 Checksum & Assemble
+    let newCrc = calculateCrc16(strForCrc);
+    return strForCrc + newCrc;
 }
 
-const RAW_STATIC_QRIS = "00020101021226610014COM.GO-JEK.WWW01189360091439559600780210G9559600780303UMI51440014ID.CO.QRIS.WWW0215ID10254109926280303UMI52048999530336054035005802ID5925MUHAMAD WIDIYANTO, Digita6008PEMALANG61055235362395028A220260324100645wuMapYJP3NID0703A016304A734";
+const RAW_STATIC_QRIS = "00020101021126610014COM.GO-JEK.WWW01189360091439559600780210G9559600780303UMI51440014ID.CO.QRIS.WWW0215ID10254109926280303UMI5204899953033605802ID5925MUHAMAD WIDIYANTO, Digita6008PEMALANG61055235362070703A0163046140";
 
 // 1. Create Transaction (Get QR Data)
 const createTransaction = async (req, res) => {
