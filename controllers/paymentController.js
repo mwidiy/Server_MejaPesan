@@ -245,15 +245,15 @@ const handleCallback = async (req, res) => {
                                 const itemCount = updatedOrder.items?.length || 0;
                                 const payload = {
                                     token: fcmToken,
-                                    notification: {
+                                    data: {
+                                        type: 'new_order',
                                         title: 'Pesanan Baru (QRIS): ' + tableName,
-                                        body: `Pembayaran QRIS Rp ${updatedOrder.totalAmount?.toLocaleString('id-ID') || exactAmount} diterima. ${itemCount} menu.`
+                                        body: `Pembayaran QRIS Rp ${updatedOrder.totalAmount?.toLocaleString('id-ID') || exactAmount} diterima. ${itemCount} menu.`,
+                                        transactionCode: order.transactionCode,
+                                        customerName: updatedOrder.customerName || ''
                                     },
                                     android: {
-                                        notification: {
-                                            channelId: 'pesanan_baru',
-                                            sound: 'sound_pesanan'
-                                        }
+                                        priority: 'high'
                                     }
                                 };
                                 await admin.messaging().send(payload);
@@ -359,15 +359,15 @@ const checkStatus = async (req, res) => {
                             const tableName = updatedOrder.table?.name || 'Takeaway';
                             const payload = {
                                 token: fcmToken,
-                                notification: {
+                                data: {
+                                    type: 'new_order',
                                     title: 'Pesanan Baru (QRIS): ' + tableName,
-                                    body: `Pembayaran QRIS diterima. ${updatedOrder.items?.length || 0} menu.`
+                                    body: `Pembayaran QRIS diterima. ${updatedOrder.items?.length || 0} menu.`,
+                                    transactionCode: orderId,
+                                    customerName: updatedOrder.customerName || ''
                                 },
                                 android: {
-                                    notification: {
-                                        channelId: 'pesanan_baru',
-                                        sound: 'sound_pesanan'
-                                    }
+                                    priority: 'high'
                                 }
                             };
                             await admin.messaging().send(payload);

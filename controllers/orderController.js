@@ -293,15 +293,15 @@ const createOrder = async (req, res) => {
                             const tableName = newOrder.table?.name || "Takeaway";
                             const payload = {
                                 token: fcmToken,
-                                notification: {
+                                data: {
+                                    type: 'new_order',
                                     title: "Pesanan Baru: " + tableName,
-                                    body: `${customerName} memesan ${items.length} menu. Total: Rp ${calculatedTotal}`
+                                    body: `${customerName} memesan ${items.length} menu. Total: Rp ${calculatedTotal}`,
+                                    transactionCode: newOrder.transactionCode,
+                                    customerName: customerName
                                 },
                                 android: {
-                                    notification: {
-                                        channelId: 'pesanan_baru',
-                                        sound: 'sound_pesanan'
-                                    }
+                                    priority: 'high'
                                 }
                             };
                             await admin.messaging().send(payload);
