@@ -284,11 +284,15 @@ const createOrder = async (req, res) => {
                 if (storeId) {
                     let storeData = null;
                     try {
+                        console.log(`[FCM DEBUG] Starting FCM for store ${storeId}...`);
+                        console.log(`[FCM DEBUG] Firebase Admin ready: ${!!admin.apps?.length}`);
                         storeData = await prisma.store.findUnique({
                             where: { id: parseInt(storeId) },
                             include: { owner: true }
                         });
+                        console.log(`[FCM DEBUG] Store found: ${!!storeData}, Owner: ${!!storeData?.owner}, OwnerId: ${storeData?.owner?.id}`);
                         const fcmToken = storeData?.owner?.fcmToken;
+                        console.log(`[FCM DEBUG] FCM Token: ${fcmToken ? fcmToken.substring(0, 20) + '...' : 'NULL/EMPTY'}`);
                         if (fcmToken) {
                             const tableName = newOrder.table?.name || "Takeaway";
                             const payload = {
@@ -304,8 +308,11 @@ const createOrder = async (req, res) => {
                                     priority: 'high'
                                 }
                             };
+                            console.log(`[FCM DEBUG] Sending FCM message...`);
                             await admin.messaging().send(payload);
                             console.log(`📲 FCM sent to owner of store ${storeId} for order ${newOrder.transactionCode}`);
+                        } else {
+                            console.warn(`[FCM DEBUG] ⚠️ SKIPPED: fcmToken is NULL for owner of store ${storeId}. Token belum disimpan ke DB!`);
                         }
                     } catch (fcmError) {
                         console.error('FCM Notification Error:', fcmError.message);
