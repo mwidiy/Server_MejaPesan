@@ -115,6 +115,7 @@ const saveFcmToken = async (req, res) => {
             data: { fcmToken }
         });
 
+        console.log(`✅ [FCM TOKEN] Saved for user ${userId}: ${fcmToken.substring(0, 20)}...`);
         res.json({ success: true, message: "FCM Token saved successfully", fcmToken: user.fcmToken });
     } catch (error) {
         console.error("Save FCM Token Error:", error);
