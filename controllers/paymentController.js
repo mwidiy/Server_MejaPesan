@@ -260,6 +260,15 @@ const handleCallback = async (req, res) => {
                             }
                         } catch (fcmError) {
                             console.error('FCM QRIS Notification Error:', fcmError.message);
+                            if (fcmError?.errorInfo?.code === 'messaging/registration-token-not-registered') {
+                                try {
+                                    const ownerId = storeData?.owner?.id;
+                                    if (ownerId) {
+                                        await prisma.user.update({ where: { id: ownerId }, data: { fcmToken: null } });
+                                        console.warn(`🗑️ Stale FCM token cleared for user ${ownerId}`);
+                                    }
+                                } catch (cleanErr) { console.error('FCM token cleanup error:', cleanErr.message); }
+                            }
                         }
                     }
                     return res.status(200).json({ status: 'ok', message: 'Order Paid via Custom PG' });
@@ -364,6 +373,15 @@ const checkStatus = async (req, res) => {
                         }
                     } catch (fcmError) {
                         console.error('FCM Polling Notification Error:', fcmError.message);
+                        if (fcmError?.errorInfo?.code === 'messaging/registration-token-not-registered') {
+                            try {
+                                const ownerId = storeData?.owner?.id;
+                                if (ownerId) {
+                                    await prisma.user.update({ where: { id: ownerId }, data: { fcmToken: null } });
+                                    console.warn(`🗑️ Stale FCM token cleared for user ${ownerId}`);
+                                }
+                            } catch (cleanErr) { console.error('FCM token cleanup error:', cleanErr.message); }
+                        }
                     }
                 }
             }

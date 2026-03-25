@@ -307,7 +307,17 @@ const createOrder = async (req, res) => {
                             console.log(`📲 FCM sent to owner of store ${storeId} for order ${newOrder.transactionCode}`);
                         }
                     } catch (fcmError) {
-                        console.error('FCM Notification Error:', fcmError);
+                        console.error('FCM Notification Error:', fcmError.message);
+                        // Auto-cleanup stale FCM tokens
+                        if (fcmError?.errorInfo?.code === 'messaging/registration-token-not-registered') {
+                            try {
+                                const ownerId = storeData?.owner?.id;
+                                if (ownerId) {
+                                    await prisma.user.update({ where: { id: ownerId }, data: { fcmToken: null } });
+                                    console.warn(`🗑️ Stale FCM token cleared for user ${ownerId}`);
+                                }
+                            } catch (cleanErr) { console.error('FCM token cleanup error:', cleanErr.message); }
+                        }
                     }
                 }
             }, 0);
