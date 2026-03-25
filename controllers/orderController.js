@@ -282,8 +282,9 @@ const createOrder = async (req, res) => {
 
                 // --- FCM PUSH NOTIFICATION ---
                 if (storeId) {
+                    let storeData = null;
                     try {
-                        const storeData = await prisma.store.findUnique({
+                        storeData = await prisma.store.findUnique({
                             where: { id: parseInt(storeId) },
                             include: { owner: true }
                         });

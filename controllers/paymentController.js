@@ -233,8 +233,9 @@ const handleCallback = async (req, res) => {
 
                     // --- FCM PUSH NOTIFICATION (QRIS Payment Success) ---
                     if (updatedOrder.storeId) {
+                        let storeData = null;
                         try {
-                            const storeData = await prisma.store.findUnique({
+                            storeData = await prisma.store.findUnique({
                                 where: { id: updatedOrder.storeId },
                                 include: { owner: true }
                             });
@@ -347,8 +348,9 @@ const checkStatus = async (req, res) => {
 
                 // --- FCM PUSH NOTIFICATION (Polling Payment Confirm) ---
                 if (updatedOrder.storeId && order.status === 'WaitingPayment') {
+                    let storeData = null;
                     try {
-                        const storeData = await prisma.store.findUnique({
+                        storeData = await prisma.store.findUnique({
                             where: { id: updatedOrder.storeId },
                             include: { owner: true }
                         });
