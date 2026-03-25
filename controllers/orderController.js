@@ -295,6 +295,12 @@ const createOrder = async (req, res) => {
                                 notification: {
                                     title: "Pesanan Baru: " + tableName,
                                     body: `${customerName} memesan ${items.length} menu. Total: Rp ${calculatedTotal}`
+                                },
+                                android: {
+                                    notification: {
+                                        channelId: 'pesanan_baru',
+                                        sound: 'sound_pesanan'
+                                    }
                                 }
                             };
                             await admin.messaging().send(payload);

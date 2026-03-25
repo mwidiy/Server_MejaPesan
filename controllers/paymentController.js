@@ -1,5 +1,6 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
+const admin = require('../utils/firebase');
 
 const midtransClient = require('midtrans-client');
 const crypto = require('crypto');
@@ -229,6 +230,38 @@ const handleCallback = async (req, res) => {
                             }
                         }
                     }
+
+                    // --- FCM PUSH NOTIFICATION (QRIS Payment Success) ---
+                    if (updatedOrder.storeId) {
+                        try {
+                            const storeData = await prisma.store.findUnique({
+                                where: { id: updatedOrder.storeId },
+                                include: { owner: true }
+                            });
+                            const fcmToken = storeData?.owner?.fcmToken;
+                            if (fcmToken) {
+                                const tableName = updatedOrder.table?.name || 'Takeaway';
+                                const itemCount = updatedOrder.items?.length || 0;
+                                const payload = {
+                                    token: fcmToken,
+                                    notification: {
+                                        title: 'Pesanan Baru (QRIS): ' + tableName,
+                                        body: `Pembayaran QRIS Rp ${updatedOrder.totalAmount?.toLocaleString('id-ID') || exactAmount} diterima. ${itemCount} menu.`
+                                    },
+                                    android: {
+                                        notification: {
+                                            channelId: 'pesanan_baru',
+                                            sound: 'sound_pesanan'
+                                        }
+                                    }
+                                };
+                                await admin.messaging().send(payload);
+                                console.log(`📲 FCM sent for QRIS payment: ${order.transactionCode}`);
+                            }
+                        } catch (fcmError) {
+                            console.error('FCM QRIS Notification Error:', fcmError.message);
+                        }
+                    }
                     return res.status(200).json({ status: 'ok', message: 'Order Paid via Custom PG' });
                 } else {
                     console.error(`[Custom PG Webhook] NO MATCH for amount: Rp ${exactAmount}`);
@@ -300,6 +333,37 @@ const checkStatus = async (req, res) => {
                         if (updatedOrder.storeId) {
                             req.io.to(`store_${updatedOrder.storeId}`).emit('new_order', updatedOrder);
                         }
+                    }
+                }
+
+                // --- FCM PUSH NOTIFICATION (Polling Payment Confirm) ---
+                if (updatedOrder.storeId && order.status === 'WaitingPayment') {
+                    try {
+                        const storeData = await prisma.store.findUnique({
+                            where: { id: updatedOrder.storeId },
+                            include: { owner: true }
+                        });
+                        const fcmToken = storeData?.owner?.fcmToken;
+                        if (fcmToken) {
+                            const tableName = updatedOrder.table?.name || 'Takeaway';
+                            const payload = {
+                                token: fcmToken,
+                                notification: {
+                                    title: 'Pesanan Baru (QRIS): ' + tableName,
+                                    body: `Pembayaran QRIS diterima. ${updatedOrder.items?.length || 0} menu.`
+                                },
+                                android: {
+                                    notification: {
+                                        channelId: 'pesanan_baru',
+                                        sound: 'sound_pesanan'
+                                    }
+                                }
+                            };
+                            await admin.messaging().send(payload);
+                            console.log(`📲 FCM sent for polling payment confirm: ${orderId}`);
+                        }
+                    } catch (fcmError) {
+                        console.error('FCM Polling Notification Error:', fcmError.message);
                     }
                 }
             }
