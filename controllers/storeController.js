@@ -42,7 +42,7 @@ const getStore = async (req, res) => {
 // Update Info
 const updateStore = async (req, res) => {
     try {
-        const { name, isOpen, bankName, bankNumber, bankHolder, ewalletType, ewalletNumber, ewalletName, whatsappNumber, isKasirQrVerificationEnabled } = req.body;
+        const { name, isOpen, bankName, bankNumber, bankHolder, ewalletType, ewalletNumber, ewalletName, whatsappNumber, isKasirQrVerificationEnabled, cashPaymentMode } = req.body;
         if (!req.storeId) return res.status(400).json({ error: 'User tidak memiliki akses Toko' });
 
         // --- HARDENING: SERVER-SIDE VALIDATION & SANITIZATION ---
@@ -81,6 +81,10 @@ const updateStore = async (req, res) => {
             if (whatsappNumber.length > 20) return res.status(400).json({ error: "WhatsApp Number too long (Max 20)" });
             if (whatsappNumber.length > 0 && !numericRegex.test(whatsappNumber)) return res.status(400).json({ error: "WhatsApp Number must be numeric" });
         }
+        if (cashPaymentMode !== undefined) {
+            const validModes = ['pre', 'post'];
+            if (!validModes.includes(cashPaymentMode)) return res.status(400).json({ error: "Cash Payment Mode must be 'pre' or 'post'" });
+        }
 
         // Update Store
         const updated = await prisma.store.update({
@@ -95,7 +99,8 @@ const updateStore = async (req, res) => {
                 ewalletNumber,
                 ewalletName,
                 whatsappNumber,
-                isKasirQrVerificationEnabled: isKasirQrVerificationEnabled === 'true' || isKasirQrVerificationEnabled === true ? true : (isKasirQrVerificationEnabled === 'false' || isKasirQrVerificationEnabled === false ? false : undefined)
+                isKasirQrVerificationEnabled: isKasirQrVerificationEnabled === 'true' || isKasirQrVerificationEnabled === true ? true : (isKasirQrVerificationEnabled === 'false' || isKasirQrVerificationEnabled === false ? false : undefined),
+                cashPaymentMode: cashPaymentMode || undefined
             }
         });
 

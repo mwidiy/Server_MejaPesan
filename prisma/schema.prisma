@@ -56,6 +56,7 @@ model Store {
 
   // Feature Flags
   isKasirQrVerificationEnabled Boolean @default(false)
+  cashPaymentMode              String  @default("post") // "post" = bayar setelah pesan, "pre" = bayar dulu
 }
 
 model Withdrawal {
