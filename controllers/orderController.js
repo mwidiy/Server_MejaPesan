@@ -212,14 +212,26 @@ const createOrder = async (req, res) => {
         // e.g. If 0 people are pending, my queue number is 1. If 5 people are pending, my queue number is 6.
         const nextQueueNumber = activeQueueCount + 1;
 
-        // LOGIC FIX: QRIS Order starts as 'WaitingPayment', NOT 'Pending'
+        // Fetch Store Data EARLY to check cashPaymentMode (also reused for FCM later)
+        let storeData = null;
+        if (storeId) {
+            storeData = await prisma.store.findUnique({
+                where: { id: parseInt(storeId) },
+                include: { owner: true }
+            });
+        }
+
+        // LOGIC FIX: QRIS Order & Cash PRE Order starts as 'WaitingPayment', NOT 'Pending'
         // This prevents Kasir from seeing unpaid orders immediately
         const isQrisUnpaid = paymentMethod === 'qris' && (!paymentStatus || paymentStatus === 'Unpaid');
-        const initialStatus = isQrisUnpaid ? 'WaitingPayment' : 'Pending';
+        const isCashPreUnpaid = paymentMethod === 'cash' && storeData?.cashPaymentMode === 'pre' && (!paymentStatus || paymentStatus === 'Unpaid');
+        const isWaitingPayment = isQrisUnpaid || isCashPreUnpaid;
+
+        const initialStatus = isWaitingPayment ? 'WaitingPayment' : 'Pending';
 
         // TAHAP 47: ONE TRUE QUEUE FIX
         // DO NOT assign actual queueNumber to 'WaitingPayment' orders. Assign 0 (Schema default).
-        const finalQueueNumber = isQrisUnpaid ? 0 : nextQueueNumber;
+        const finalQueueNumber = isWaitingPayment ? 0 : nextQueueNumber;
 
         // 6. Prisma Transaction (Atomic Create)
         const newOrder = await prisma.$transaction(async (tx) => {
@@ -267,7 +279,7 @@ const createOrder = async (req, res) => {
 
         // 7. Real-time Trigger
         // Only emit if NOT waiting for payment. If waiting, emit later after payment success.
-        if (req.io && !isQrisUnpaid) {
+        if (req.io && !isWaitingPayment) {
             // OPTIMIZATION 44: Asynchronous Socket Offloading
             // Eksekusi Emit di background agar API Checkout merespon instan seketika
             setTimeout(async () => {
@@ -282,14 +294,10 @@ const createOrder = async (req, res) => {
 
                 // --- FCM PUSH NOTIFICATION ---
                 if (storeId) {
-                    let storeData = null;
                     try {
                         console.log(`[FCM DEBUG] Starting FCM for store ${storeId}...`);
                         console.log(`[FCM DEBUG] Firebase Admin ready: ${!!admin.apps?.length}`);
-                        storeData = await prisma.store.findUnique({
-                            where: { id: parseInt(storeId) },
-                            include: { owner: true }
-                        });
+                        // storeData is already fetched above
                         console.log(`[FCM DEBUG] Store found: ${!!storeData}, Owner: ${!!storeData?.owner}, OwnerId: ${storeData?.owner?.id}`);
                         const fcmToken = storeData?.owner?.fcmToken;
                         console.log(`[FCM DEBUG] FCM Token: ${fcmToken ? fcmToken.substring(0, 20) + '...' : 'NULL/EMPTY'}`);
@@ -329,8 +337,8 @@ const createOrder = async (req, res) => {
                     }
                 }
             }, 0);
-        } else if (isQrisUnpaid) {
-            console.log(`Creating QRIS Order ${newOrder.transactionCode} - Waiting for Payment (No Socket Emit yet)`);
+        } else if (isWaitingPayment) {
+            console.log(`Creating WaitingPayment Order ${newOrder.transactionCode} (QRIS/Cash PRE) - No Socket Emit yet`);
         }
 
         res.status(201).json({
@@ -443,6 +451,28 @@ const updateOrderStatus = async (req, res) => {
             dataToUpdate.paymentStatus = 'Cancelled';
         }
 
+        // TAHAP 56: Cash PRE 'WaitingPayment' -> 'Pending' Transition
+        // When cashier scans QR, they send paymentStatus = 'Paid'. But order is 'WaitingPayment'.
+        // We must upgrade it to 'Pending', assign Queue Number, and trigger new_order socket!
+        let isTransitioningToPending = false;
+        if (dataToUpdate.paymentStatus === 'Paid' && currentOrder.status === 'WaitingPayment' && !status) {
+            dataToUpdate.status = 'Pending';
+            isTransitioningToPending = true;
+
+            // Generate Queue Number exactly like in webhook logic
+            const wibDateString = new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" });
+            const wibDateObj = new Date(wibDateString);
+            wibDateObj.setHours(0, 0, 0, 0);
+            const todayStart = new Date(wibDateObj.getTime() - (7 * 60 * 60 * 1000));
+
+            const whereQueue = { status: { in: ['Pending', 'Processing'] } };
+            if (currentOrder.storeId) whereQueue.storeId = currentOrder.storeId;
+            whereQueue.createdAt = { gte: todayStart };
+
+            const activeQueueCount = await prisma.order.count({ where: whereQueue });
+            dataToUpdate.queueNumber = activeQueueCount + 1;
+        }
+
         const updatedOrder = await prisma.order.update({
             where: { id: parseInt(id) },
             data: dataToUpdate,
@@ -465,7 +495,16 @@ const updateOrderStatus = async (req, res) => {
                 if (updatedOrder.storeId) {
                     req.io.to(`store_${updatedOrder.storeId}`).emit('order_status_updated', updatedOrder);
                 }
-                console.log(`📡 Emitted 'order_status_updated': ${updatedOrder.transactionCode} -> ${status} (Store: ${updatedOrder.storeId})`);
+                console.log(`📡 Emitted 'order_status_updated': ${updatedOrder.transactionCode} -> ${dataToUpdate.status || status} (Store: ${updatedOrder.storeId})`);
+
+                // Also emit 'new_order' if we just transitioned out of WaitingPayment
+                if (isTransitioningToPending) {
+                    req.io.emit('new_order', updatedOrder);
+                    if (updatedOrder.storeId) {
+                        req.io.to(`store_${updatedOrder.storeId}`).emit('new_order', updatedOrder);
+                    }
+                    console.log(`📡 Emitted 'new_order' (Post-Verification): ${updatedOrder.transactionCode}`);
+                }
             }, 0);
         }
 
