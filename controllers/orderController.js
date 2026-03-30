@@ -418,6 +418,11 @@ const updateOrderStatus = async (req, res) => {
 
         if (!currentOrder) return res.status(404).json({ message: 'Order not found' });
 
+        // SECURITY FIX: CROSS-STORE AUTHORIZATION WALL
+        if (req.storeId && currentOrder.storeId && currentOrder.storeId !== req.storeId) {
+            return res.status(403).json({ success: false, message: "Akses Ditolak: Pesanan ini milik toko lain." });
+        }
+
         // Logic update field status dan paymentStatus
         let dataToUpdate = {};
         if (status) {
@@ -750,6 +755,11 @@ const approveCancel = async (req, res) => {
 
         if (!order) return res.status(404).json({ message: "Order not found" });
 
+        // SECURITY FIX: CROSS-STORE AUTHORIZATION WALL
+        if (req.storeId && order.storeId && order.storeId !== req.storeId) {
+            return res.status(403).json({ success: false, message: "Akses Ditolak: Pesanan ini milik toko lain." });
+        }
+
         const updatedOrder = await prisma.order.update({
             where: { id: parseInt(id) },
             data: {
@@ -780,6 +790,12 @@ const rejectCancel = async (req, res) => {
         console.log(`[DEBUG] Reason provided: ${reason}`);
 
         const order = await prisma.order.findUnique({ where: { id: parseInt(id) } });
+        if (!order) return res.status(404).json({ message: "Order not found" });
+
+        // SECURITY FIX: CROSS-STORE AUTHORIZATION WALL
+        if (req.storeId && order.storeId && order.storeId !== req.storeId) {
+            return res.status(403).json({ success: false, message: "Akses Ditolak: Pesanan ini milik toko lain." });
+        }
 
         let updatedData = {};
         let message = "";
@@ -823,6 +839,11 @@ const verifyRefund = async (req, res) => {
         const order = await prisma.order.findUnique({ where: { transactionCode } });
 
         if (!order) return res.status(404).json({ message: "Order not found" });
+
+        // SECURITY FIX: CROSS-STORE AUTHORIZATION WALL
+        if (req.storeId && order.storeId && order.storeId !== req.storeId) {
+            return res.status(403).json({ success: false, message: "Akses Ditolak: Pesanan ini milik toko lain." });
+        }
 
         // Check validity for refund
         if (order.status !== 'Cancelled' && order.cancellationStatus !== 'AutoCancelled') {
