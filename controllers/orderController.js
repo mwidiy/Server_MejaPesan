@@ -561,6 +561,14 @@ const getOrderByTransactionCode = async (req, res) => {
         // SECURITY: Limit length and eliminate complex characters
         code = String(code || '').substring(0, 50).replace(/[<>{}\'";=\\]/g, '').trim();
 
+        // BACKWARD COMPATIBILITY: Ekstrak TRX code jika pemindai menggunakan Kasir APK versi lama
+        if (code.startsWith('STORE:')) {
+            const parts = code.split('|');
+            if (parts.length === 2) {
+                code = parts[1];
+            }
+        }
+
         const order = await prisma.order.findUnique({
             where: { transactionCode: code },
             include: {
@@ -835,7 +843,16 @@ const rejectCancel = async (req, res) => {
 
 const verifyRefund = async (req, res) => {
     try {
-        const { transactionCode } = req.body;
+        let { transactionCode } = req.body;
+        
+        // BACKWARD COMPATIBILITY: Ekstrak TRX code jika Cashier App versi lama scan QR baru
+        if (transactionCode && transactionCode.startsWith('STORE:')) {
+            const parts = transactionCode.split('|');
+            if (parts.length === 2) {
+                transactionCode = parts[1];
+            }
+        }
+
         const order = await prisma.order.findUnique({ where: { transactionCode } });
 
         if (!order) return res.status(404).json({ message: "Order not found" });
