@@ -198,6 +198,30 @@ app.get('/', (req, res) => {
   res.send('Server Backend Kasir Siap! 🚀 Silakan akses /api/products');
 });
 
+// --- TAHAP 64: SMART PING TRACKER (KOYEB COLD START PREVENTER) ---
+global.lastRealUserActiveTime = Date.now();
+
+// Middleware pencatat aktivitas user (Abaikan Ping Pingan dari hitungan)
+app.use((req, res, next) => {
+  if (req.path !== '/api/smart-ping') {
+    global.lastRealUserActiveTime = Date.now();
+  }
+  next();
+});
+
+app.get('/api/smart-ping', (req, res) => {
+  const timeSinceLastActive = Date.now() - global.lastRealUserActiveTime;
+  const TEN_MINUTES = 10 * 60 * 1000;
+  
+  if (timeSinceLastActive < TEN_MINUTES) {
+    // Kalo user masih aktif didalam 10 menit, balikin response super kecil (0 bytes body) -> Hemat Bandwith 100%
+    return res.status(204).send();
+  } else {
+    // Kalo udah ga ada user > 10 menit (Server nyaris bobo), kirim 200 OK buat ngakalin Koyeb Proxy
+    return res.status(200).json({ status: "Stay Awake Koyeb!" });
+  }
+});
+
 // --- API ROUTES ---
 app.use('/api/products', productRoutes);
 app.use('/api/categories', require('./routes/categoryRoutes'));
