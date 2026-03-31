@@ -90,9 +90,10 @@ const createTransaction = async (req, res) => {
         // --- MIDTRANS GATEWAY LOGIC ---
         if (gateway === 'midtrans') {
             try {
-                const midtransOrderId = orderId.toString();
+                // PENTING: Gunakan suffix '_MD_' + timestamp agar Midtrans tidak menolak duplicate order_id (error 406) saat di-refresh!
+                const midtransOrderId = `${orderId.toString()}_MD_${Date.now()}`;
                 const qrisParam = {
-                    payment_type: "qris",
+                    payment_type: "gopay", // 'gopay' adalah tipe yang paling robust di production untuk cetak QRIS Midtrans
                     transaction_details: {
                         order_id: midtransOrderId,
                         gross_amount: Math.round(amount)
@@ -103,24 +104,26 @@ const createTransaction = async (req, res) => {
                 const qrAction = chargeResponse.actions?.find(a => a.name === 'generate-qr-code');
                 
                 if (!qrAction || !qrAction.url) {
-                    throw new Error("Gagal mendapatkan QR dari Midtrans");
+                    console.error("[Midtrans] Response missing QR URL:", chargeResponse);
+                    throw new Error("Midtrans tidak mengembalikan QR Code. Pastikan metode Gopay/QRIS aktif di dashboard.");
                 }
 
-                console.log(`[Midtrans] Generated QR for Order ${orderId}`);
+                console.log(`[Midtrans] Generated QR for Order ${midtransOrderId}`);
 
                 return res.json({
                     success: true,
                     data: {
                         qrString: qrAction.url, // URL to QR Code Image API
                         amount: Math.round(amount),
-                        orderId: orderId,
+                        orderId: midtransOrderId, // Frontend akan menggunakan orderId Midtrans ini
                         gateway: 'midtrans',
                         expiry: new Date(Date.now() + 15 * 60000).toISOString()
                     }
                 });
             } catch (midError) {
-                console.error("[Midtrans] Create Error:", midError.message || midError);
-                return res.status(500).json({ success: false, message: "Gagal membuat transaksi Midtrans. Silakan gunakan server lokal." });
+                console.error("[Midtrans] Create Error Detail:", midError.ApiResponse ? midError.ApiResponse : midError.message);
+                const errMsg = midError.ApiResponse?.error_messages ? midError.ApiResponse.error_messages.join(', ') : (midError.message || 'Error internal Midtrans');
+                return res.status(500).json({ success: false, message: `Gagal ke Midtrans: ${errMsg}` });
             }
         }
 
@@ -319,14 +322,16 @@ const handleCallback = async (req, res) => {
 
         // --- MIDTRANS WEBHOOK MATCHING ---
         if (payload.transaction_status) {
-            console.log(`[Midtrans Webhook] Incoming Status:`, payload.transaction_status, "for Order:", payload.order_id);
             const status = payload.transaction_status.toLowerCase();
-            const orderId = payload.order_id;
+            const fullOrderId = payload.order_id;
+            const actualOrderId = fullOrderId.split('_MD_')[0]; // Ambil ID asli lokal
+
+            console.log(`[Midtrans Webhook] Incoming Status:`, status, "for Order:", actualOrderId);
             
             if (isSuccessStatus(status)) {
-                // Find order matching order_id
+                // Find order matching actualOrderId
                 const order = await prisma.order.findUnique({
-                    where: { transactionCode: orderId },
+                    where: { transactionCode: actualOrderId },
                     include: { table: { include: { location: true } }, items: { include: { product: true } } }
                 });
 
@@ -436,17 +441,19 @@ const checkStatus = async (req, res) => {
 
     if (!orderId) return res.status(400).json({ message: 'Missing params' });
 
+    const actualOrderId = orderId.split('_MD_')[0];
+
     try {
-        const localOrder = await prisma.order.findUnique({ where: { transactionCode: orderId } });
+        const localOrder = await prisma.order.findUnique({ where: { transactionCode: actualOrderId } });
 
         if (localOrder && localOrder.paymentStatus === 'Paid') {
             return res.json({ success: true, status: 'Paid', message: 'Verified from Local DB' });
         }
 
-        const result = await fetchTransactionStatus(orderId);
+        const result = await fetchTransactionStatus(orderId); // Panggil Midtrans pakai full ID
 
         if (result && isSuccessStatus(result.transaction_status)) {
-            const order = localOrder || await prisma.order.findUnique({ where: { transactionCode: orderId } });
+            const order = localOrder || await prisma.order.findUnique({ where: { transactionCode: actualOrderId } });
 
             if (order && order.paymentStatus !== 'Paid') {
                 const newStatus = order.status === 'WaitingPayment' ? 'Pending' : order.status;
@@ -470,14 +477,18 @@ const checkStatus = async (req, res) => {
                 }
 
                 const updatedOrder = await prisma.order.update({
-                    where: { transactionCode: orderId },
+                    where: { transactionCode: actualOrderId },
                     data: { paymentStatus: 'Paid', status: newStatus, queueNumber: generatedQueueNumber },
                     include: { table: { include: { location: true } }, items: { include: { product: true } } }
                 });
 
                 if (req.io) {
+                    // Beritahu frontend memakai full orderId dan actualOrderId agar dua-duanya nge-trigger sukses
                     req.io.emit('order_update', { transactionCode: orderId, status: 'Paid' });
-                    req.io.to(orderId).emit('order_update', { transactionCode: orderId, status: 'Paid', source: 'polling-direct' });
+                    req.io.emit('order_update', { transactionCode: actualOrderId, status: 'Paid' });
+                    
+                    req.io.to(orderId).emit('order_update', { transactionCode: orderId, status: 'Paid', source: 'polling-midtrans' });
+                    req.io.to(actualOrderId).emit('order_update', { transactionCode: actualOrderId, status: 'Paid', source: 'polling-direct' });
 
                     if (order.status === 'WaitingPayment') {
                         req.io.emit('new_order', updatedOrder);
