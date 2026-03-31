@@ -12,6 +12,13 @@ const coreApi = new midtransClient.CoreApi({
     clientKey: process.env.MIDTRANS_CLIENT_KEY
 });
 
+const snapApi = new midtransClient.Snap({
+    isProduction: process.env.MIDTRANS_IS_PRODUCTION === 'true',
+    serverKey: process.env.MIDTRANS_SERVER_KEY,
+    clientKey: process.env.MIDTRANS_CLIENT_KEY
+});
+
+
 // Helper to check status
 const fetchTransactionStatus = async (orderId) => {
     try {
@@ -92,28 +99,32 @@ const createTransaction = async (req, res) => {
             try {
                 // PENTING: Gunakan suffix '_MD_' + timestamp agar Midtrans tidak menolak duplicate order_id (error 406) saat di-refresh!
                 const midtransOrderId = `${orderId.toString()}_MD_${Date.now()}`;
-                const qrisParam = {
-                    payment_type: "gopay", // 'gopay' adalah tipe yang paling robust di production untuk cetak QRIS Midtrans
+                
+                // Gunakan SNAP API untuk menampilkan payment popup alih-alih mengambil string QR
+                // Ini menghilangkan error 402 karena opsi payment type dihandle Midtrans langsung
+                const parameter = {
                     transaction_details: {
                         order_id: midtransOrderId,
                         gross_amount: Math.round(amount)
+                    },
+                    customer_details: {
+                        first_name: "Customer",
                     }
                 };
 
-                const chargeResponse = await coreApi.charge(qrisParam);
-                const qrAction = chargeResponse.actions?.find(a => a.name === 'generate-qr-code');
+                const transaction = await snapApi.createTransaction(parameter);
                 
-                if (!qrAction || !qrAction.url) {
-                    console.error("[Midtrans] Response missing QR URL:", chargeResponse);
-                    throw new Error("Midtrans tidak mengembalikan QR Code. Pastikan metode Gopay/QRIS aktif di dashboard.");
+                if (!transaction.redirect_url) {
+                    console.error("[Midtrans Snap] Response missing URL:", transaction);
+                    throw new Error("Midtrans tidak mengembalikan Snap URL.");
                 }
 
-                console.log(`[Midtrans] Generated QR for Order ${midtransOrderId}`);
+                console.log(`[Midtrans Snap] Generated URL for Order ${midtransOrderId}`);
 
                 return res.json({
                     success: true,
                     data: {
-                        qrString: qrAction.url, // URL to QR Code Image API
+                        paymentUrl: transaction.redirect_url, // Kembalikan ke format paymentUrl agar frontend nge-handle sbg popup
                         amount: Math.round(amount),
                         orderId: midtransOrderId, // Frontend akan menggunakan orderId Midtrans ini
                         gateway: 'midtrans',
