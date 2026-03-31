@@ -75,7 +75,7 @@ const RAW_STATIC_QRIS = "00020101021126610014COM.GO-JEK.WWW011893600914395596007
 
 // 1. Create Transaction (Get QR Data)
 const createTransaction = async (req, res) => {
-    const { orderId, amount } = req.body;
+    const { orderId, amount, gateway = 'homemade' } = req.body;
 
     if (!orderId || !amount) {
         return res.status(400).json({ success: false, message: 'Missing orderId or amount' });
@@ -85,6 +85,43 @@ const createTransaction = async (req, res) => {
         const order = await prisma.order.findUnique({ where: { transactionCode: orderId.toString() } });
         if (order && order.paymentStatus === 'Paid') {
             return res.json({ success: true, status: 'Paid', message: 'Order already paid' });
+        }
+
+        // --- MIDTRANS GATEWAY LOGIC ---
+        if (gateway === 'midtrans') {
+            try {
+                const midtransOrderId = orderId.toString();
+                const qrisParam = {
+                    payment_type: "qris",
+                    transaction_details: {
+                        order_id: midtransOrderId,
+                        gross_amount: Math.round(amount)
+                    }
+                };
+
+                const chargeResponse = await coreApi.charge(qrisParam);
+                const qrAction = chargeResponse.actions?.find(a => a.name === 'generate-qr-code');
+                
+                if (!qrAction || !qrAction.url) {
+                    throw new Error("Gagal mendapatkan QR dari Midtrans");
+                }
+
+                console.log(`[Midtrans] Generated QR for Order ${orderId}`);
+
+                return res.json({
+                    success: true,
+                    data: {
+                        qrString: qrAction.url, // URL to QR Code Image API
+                        amount: Math.round(amount),
+                        orderId: orderId,
+                        gateway: 'midtrans',
+                        expiry: new Date(Date.now() + 15 * 60000).toISOString()
+                    }
+                });
+            } catch (midError) {
+                console.error("[Midtrans] Create Error:", midError.message || midError);
+                return res.status(500).json({ success: false, message: "Gagal membuat transaksi Midtrans. Silakan gunakan server lokal." });
+            }
         }
 
         // --- CUSTOM PG UNIQUE CODE LOGIC (SMART SEQUENTIAL) ---
@@ -280,8 +317,112 @@ const handleCallback = async (req, res) => {
             }
         }
 
-        // Midtrans Fallback (Ignored for Custom PG POC)
-        res.status(200).json({ status: 'ok', message: 'Ignored payload' });
+        // --- MIDTRANS WEBHOOK MATCHING ---
+        if (payload.transaction_status) {
+            console.log(`[Midtrans Webhook] Incoming Status:`, payload.transaction_status, "for Order:", payload.order_id);
+            const status = payload.transaction_status.toLowerCase();
+            const orderId = payload.order_id;
+            
+            if (isSuccessStatus(status)) {
+                // Find order matching order_id
+                const order = await prisma.order.findUnique({
+                    where: { transactionCode: orderId },
+                    include: { table: { include: { location: true } }, items: { include: { product: true } } }
+                });
+
+                if (order && order.paymentStatus !== 'Paid') {
+                    console.log(`[Midtrans Webhook] MATCHED Order: ${order.transactionCode}`);
+                    
+                    const newStatus = order.status === 'WaitingPayment' ? 'Pending' : order.status;
+                    let generatedQueueNumber = order.queueNumber;
+
+                    if (order.status === 'WaitingPayment' && (!order.queueNumber || order.queueNumber === 0)) {
+                        const parts = new Intl.DateTimeFormat('en-US', {
+                            timeZone: 'Asia/Jakarta', year: 'numeric', month: 'numeric', day: 'numeric'
+                        }).formatToParts(new Date());
+
+                        const wib = {};
+                        parts.forEach(p => wib[p.type] = p.value);
+                        const todayStart = new Date(Date.UTC(wib.year, wib.month - 1, wib.day, -7, 0, 0, 0));
+
+                        const whereQueue = { status: { in: ['Pending', 'Processing'] } };
+                        if (order.storeId) whereQueue.storeId = order.storeId;
+                        whereQueue.createdAt = { gte: todayStart };
+
+                        const activeQueueCount = await prisma.order.count({ where: whereQueue });
+                        generatedQueueNumber = activeQueueCount + 1;
+                    }
+
+                    const updatedOrder = await prisma.order.update({
+                        where: { id: order.id },
+                        data: {
+                            paymentStatus: 'Paid',
+                            status: newStatus,
+                            queueNumber: generatedQueueNumber
+                        },
+                        include: { table: { include: { location: true } }, items: { include: { product: true } } }
+                    });
+
+                    // Emit Realtime Sockets
+                    if (req.io) {
+                        req.io.emit('order_update', { transactionCode: order.transactionCode, status: 'Paid', source: 'webhook-midtrans' });
+                        req.io.to(order.transactionCode).emit('order_update', { transactionCode: order.transactionCode, status: 'Paid', source: 'webhook-midtrans-direct' });
+
+                        if (order.status === 'WaitingPayment') {
+                            req.io.emit('new_order', updatedOrder);
+                            if (updatedOrder.storeId) {
+                                req.io.to(`store_${updatedOrder.storeId}`).emit('new_order', updatedOrder);
+                            }
+                        }
+                    }
+
+                    // --- FCM PUSH NOTIFICATION (Midtrans Payment Success) ---
+                    if (updatedOrder.storeId) {
+                        let storeData = null;
+                        try {
+                            storeData = await prisma.store.findUnique({
+                                where: { id: updatedOrder.storeId },
+                                include: { owner: true }
+                            });
+                            const fcmToken = storeData?.owner?.fcmToken;
+                            if (fcmToken) {
+                                const tableName = updatedOrder.table?.name || 'Takeaway';
+                                const itemCount = updatedOrder.items?.length || 0;
+                                const payloadFcm = {
+                                    token: fcmToken,
+                                    data: {
+                                        type: 'new_order',
+                                        title: 'Pesanan Baru (Midtrans): ' + tableName,
+                                        body: `Pembayaran Midtrans Rp ${updatedOrder.totalAmount?.toLocaleString('id-ID')} diterima. ${itemCount} menu.`,
+                                        transactionCode: order.transactionCode,
+                                        customerName: updatedOrder.customerName || ''
+                                    },
+                                    android: { priority: 'high' }
+                                };
+                                await admin.messaging().send(payloadFcm);
+                                console.log(`📲 FCM sent for Midtrans payment: ${order.transactionCode}`);
+                            }
+                        } catch (fcmError) {
+                            console.error('FCM Midtrans Notification Error:', fcmError.message);
+                        }
+                    }
+                    return res.status(200).json({ status: 'ok', message: 'Order Paid via Midtrans' });
+                } else if (order && order.paymentStatus === 'Paid') {
+                    // Already Paid
+                    console.log(`[Midtrans Webhook] Order ${orderId} already paid`);
+                    return res.status(200).json({ status: 'ok', message: 'Order already paid' });
+                } else {
+                    console.error(`[Midtrans Webhook] NO MATCH for Midtrans orderId: ${orderId}`);
+                    return res.status(200).json({ status: 'ignored', message: 'No order matched this Midtrans ID' });
+                }
+            } else {
+                console.log(`[Midtrans Webhook] Ignored non-success status: ${status} for ${orderId}`);
+                return res.status(200).json({ status: 'ok', message: 'Ignored status' });
+            }
+        }
+
+        // Catch-All
+        res.status(200).json({ status: 'ok', message: 'Ignored unknown payload' });
 
     } catch (error) {
         console.error("[Custom PG] Webhook Error:", error);
