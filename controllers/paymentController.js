@@ -1,9 +1,13 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const admin = require('../utils/firebase');
+const NodeCache = require('node-cache');
 
 const midtransClient = require('midtrans-client');
 const crypto = require('crypto');
+
+// --- PERFORMANCE: In-Memory Cache for Active Unique Codes (TTL 6 min) ---
+const uniqueCodeCache = new NodeCache({ stdTTL: 360, checkperiod: 60 });
 
 // --- MIDTRANS CONFIG ---
 const coreApi = new midtransClient.CoreApi({
@@ -148,7 +152,7 @@ const createTransaction = async (req, res) => {
             }
         }
 
-        // --- CUSTOM PG UNIQUE CODE LOGIC (SMART SEQUENTIAL) ---
+        // --- CUSTOM PG UNIQUE CODE LOGIC (SMART SEQUENTIAL + CACHE) ---
         let baseAmount = Math.round(amount);
         let finalAmount = baseAmount;
         let shouldGenerateNew = true;
@@ -160,30 +164,31 @@ const createTransaction = async (req, res) => {
         }
 
         if (shouldGenerateNew) {
-            // 6 minutes expiration rule
-            const sixMinutesAgo = new Date(Date.now() - 6 * 60 * 1000);
+            const cacheKey = `uq_${baseAmount}`;
+            let usedCodes = uniqueCodeCache.get(cacheKey);
 
-            // Fetch all UNPAID orders with the same base amount configured within the last 6 mins
-            const activeSimilarOrders = await prisma.order.findMany({
-                where: {
-                    totalAmount: {
-                        gte: baseAmount + 1,
-                        lte: baseAmount + 999
+            if (!usedCodes) {
+                // Cache MISS: Seed from DB (cold start / first request for this amount)
+                const sixMinutesAgo = new Date(Date.now() - 6 * 60 * 1000);
+                const activeSimilarOrders = await prisma.order.findMany({
+                    where: {
+                        totalAmount: { gte: baseAmount + 1, lte: baseAmount + 999 },
+                        paymentStatus: 'Unpaid',
+                        status: { in: ['WaitingPayment', 'Pending'] },
+                        createdAt: { gte: sixMinutesAgo },
+                        transactionCode: { not: orderId.toString() }
                     },
-                    paymentStatus: 'Unpaid',
-                    status: { in: ['WaitingPayment', 'Pending'] },
-                    createdAt: { gte: sixMinutesAgo },
-                    transactionCode: { not: orderId.toString() } // exclude self
-                },
-                select: { totalAmount: true }
-            });
+                    select: { totalAmount: true }
+                });
+                usedCodes = activeSimilarOrders.map(o => o.totalAmount - baseAmount);
+            }
 
-            // Extract used codes into a Set for O(1) lookup
-            const usedCodes = new Set(activeSimilarOrders.map(o => o.totalAmount - baseAmount));
+            // Convert to Set for O(1) lookup
+            const usedSet = new Set(usedCodes);
 
             // Find the smallest available code starting from 1
             let uniqueCode = 1;
-            while (usedCodes.has(uniqueCode)) {
+            while (usedSet.has(uniqueCode)) {
                 uniqueCode++;
                 if (uniqueCode > 999) {
                     throw new Error("Antrean pembayaran penuh, coba lagi dalam beberapa menit.");
@@ -191,6 +196,10 @@ const createTransaction = async (req, res) => {
             }
             
             finalAmount = baseAmount + uniqueCode;
+
+            // Update cache with new code claimed (persist for next concurrent request)
+            usedCodes = [...(Array.isArray(usedCodes) ? usedCodes : []), uniqueCode];
+            uniqueCodeCache.set(cacheKey, usedCodes);
             
             await prisma.order.update({
                 where: { id: order.id },
@@ -279,61 +288,75 @@ const handleCallback = async (req, res) => {
                         include: { table: { include: { location: true } }, items: { include: { product: true } } }
                     });
 
-                    // Emit Realtime Sockets
-                    if (req.io) {
-                        req.io.emit('order_update', { transactionCode: order.transactionCode, status: 'Paid', source: 'webhook-custom' });
-                        req.io.to(order.transactionCode).emit('order_update', { transactionCode: order.transactionCode, status: 'Paid', source: 'webhook-custom-direct' });
+                    // FIRE-AND-FORGET: Respond to webhook IMMEDIATELY, then process side-effects in background
+                    const _io = req.io;
+                    const _orderTC = order.transactionCode;
+                    const _orderStatus = order.status;
+                    const _updatedOrder = updatedOrder;
+                    const _exactAmount = exactAmount;
 
-                        if (order.status === 'WaitingPayment') {
-                            req.io.emit('new_order', updatedOrder);
-                            if (updatedOrder.storeId) {
-                                req.io.to(`store_${updatedOrder.storeId}`).emit('new_order', updatedOrder);
-                            }
-                        }
-                    }
+                    // Respond 200 INSTANTLY to webhook provider
+                    res.status(200).json({ status: 'ok', message: 'Order Paid via Custom PG' });
 
-                    // --- FCM PUSH NOTIFICATION (QRIS Payment Success) ---
-                    if (updatedOrder.storeId) {
-                        let storeData = null;
+                    // Background: Socket.IO + FCM (non-blocking)
+                    setTimeout(async () => {
                         try {
-                            storeData = await prisma.store.findUnique({
-                                where: { id: updatedOrder.storeId },
-                                include: { owner: true }
-                            });
-                            const fcmToken = storeData?.owner?.fcmToken;
-                            if (fcmToken) {
-                                const tableName = updatedOrder.table?.name || 'Takeaway';
-                                const itemCount = updatedOrder.items?.length || 0;
-                                const payload = {
-                                    token: fcmToken,
-                                    data: {
-                                        type: 'new_order',
-                                        title: 'Pesanan Baru (QRIS): ' + tableName,
-                                        body: `Pembayaran QRIS Rp ${updatedOrder.totalAmount?.toLocaleString('id-ID') || exactAmount} diterima. ${itemCount} menu.`,
-                                        transactionCode: order.transactionCode,
-                                        customerName: updatedOrder.customerName || ''
-                                    },
-                                    android: {
-                                        priority: 'high'
+                            if (_io) {
+                                _io.emit('order_update', { transactionCode: _orderTC, status: 'Paid', source: 'webhook-custom' });
+                                _io.to(_orderTC).emit('order_update', { transactionCode: _orderTC, status: 'Paid', source: 'webhook-custom-direct' });
+
+                                if (_orderStatus === 'WaitingPayment') {
+                                    _io.emit('new_order', _updatedOrder);
+                                    if (_updatedOrder.storeId) {
+                                        _io.to(`store_${_updatedOrder.storeId}`).emit('new_order', _updatedOrder);
                                     }
-                                };
-                                await admin.messaging().send(payload);
-                                console.log(`📲 FCM sent for QRIS payment: ${order.transactionCode}`);
+                                }
                             }
-                        } catch (fcmError) {
-                            console.error('FCM QRIS Notification Error:', fcmError.message);
-                            if (fcmError?.errorInfo?.code === 'messaging/registration-token-not-registered') {
+
+                            // FCM Push Notification
+                            if (_updatedOrder.storeId) {
+                                let storeData = null;
                                 try {
-                                    const ownerId = storeData?.owner?.id;
-                                    if (ownerId) {
-                                        await prisma.user.update({ where: { id: ownerId }, data: { fcmToken: null } });
-                                        console.warn(`🗑️ Stale FCM token cleared for user ${ownerId}`);
+                                    storeData = await prisma.store.findUnique({
+                                        where: { id: _updatedOrder.storeId },
+                                        include: { owner: true }
+                                    });
+                                    const fcmToken = storeData?.owner?.fcmToken;
+                                    if (fcmToken) {
+                                        const tableName = _updatedOrder.table?.name || 'Takeaway';
+                                        const itemCount = _updatedOrder.items?.length || 0;
+                                        const payload = {
+                                            token: fcmToken,
+                                            data: {
+                                                type: 'new_order',
+                                                title: 'Pesanan Baru (QRIS): ' + tableName,
+                                                body: `Pembayaran QRIS Rp ${_updatedOrder.totalAmount?.toLocaleString('id-ID') || _exactAmount} diterima. ${itemCount} menu.`,
+                                                transactionCode: _orderTC,
+                                                customerName: _updatedOrder.customerName || ''
+                                            },
+                                            android: { priority: 'high' }
+                                        };
+                                        await admin.messaging().send(payload);
+                                        console.log(`📲 FCM sent for QRIS payment: ${_orderTC}`);
                                     }
-                                } catch (cleanErr) { console.error('FCM token cleanup error:', cleanErr.message); }
+                                } catch (fcmError) {
+                                    console.error('FCM QRIS Notification Error:', fcmError.message);
+                                    if (fcmError?.errorInfo?.code === 'messaging/registration-token-not-registered') {
+                                        try {
+                                            const ownerId = storeData?.owner?.id;
+                                            if (ownerId) {
+                                                await prisma.user.update({ where: { id: ownerId }, data: { fcmToken: null } });
+                                                console.warn(`🗑️ Stale FCM token cleared for user ${ownerId}`);
+                                            }
+                                        } catch (cleanErr) { console.error('FCM token cleanup error:', cleanErr.message); }
+                                    }
+                                }
                             }
+                        } catch (bgErr) {
+                            console.error('[Custom PG Webhook] Background task error:', bgErr.message);
                         }
-                    }
-                    return res.status(200).json({ status: 'ok', message: 'Order Paid via Custom PG' });
+                    }, 0);
+                    return; // Already responded above
                 } else {
                     console.error(`[Custom PG Webhook] NO MATCH for amount: Rp ${exactAmount}`);
                     return res.status(200).json({ status: 'ignored', message: 'No order matched this nominal' });
@@ -389,50 +412,63 @@ const handleCallback = async (req, res) => {
                         include: { table: { include: { location: true } }, items: { include: { product: true } } }
                     });
 
-                    // Emit Realtime Sockets
-                    if (req.io) {
-                        req.io.emit('order_update', { transactionCode: order.transactionCode, status: 'Paid', source: 'webhook-midtrans' });
-                        req.io.to(order.transactionCode).emit('order_update', { transactionCode: order.transactionCode, status: 'Paid', source: 'webhook-midtrans-direct' });
+                    // FIRE-AND-FORGET: Respond to Midtrans webhook IMMEDIATELY
+                    const _ioMT = req.io;
+                    const _orderTCMT = order.transactionCode;
+                    const _orderStatusMT = order.status;
+                    const _updatedOrderMT = updatedOrder;
 
-                        if (order.status === 'WaitingPayment') {
-                            req.io.emit('new_order', updatedOrder);
-                            if (updatedOrder.storeId) {
-                                req.io.to(`store_${updatedOrder.storeId}`).emit('new_order', updatedOrder);
-                            }
-                        }
-                    }
+                    res.status(200).json({ status: 'ok', message: 'Order Paid via Midtrans' });
 
-                    // --- FCM PUSH NOTIFICATION (Midtrans Payment Success) ---
-                    if (updatedOrder.storeId) {
-                        let storeData = null;
+                    // Background: Socket.IO + FCM
+                    setTimeout(async () => {
                         try {
-                            storeData = await prisma.store.findUnique({
-                                where: { id: updatedOrder.storeId },
-                                include: { owner: true }
-                            });
-                            const fcmToken = storeData?.owner?.fcmToken;
-                            if (fcmToken) {
-                                const tableName = updatedOrder.table?.name || 'Takeaway';
-                                const itemCount = updatedOrder.items?.length || 0;
-                                const payloadFcm = {
-                                    token: fcmToken,
-                                    data: {
-                                        type: 'new_order',
-                                        title: 'Pesanan Baru (Midtrans): ' + tableName,
-                                        body: `Pembayaran Midtrans Rp ${updatedOrder.totalAmount?.toLocaleString('id-ID')} diterima. ${itemCount} menu.`,
-                                        transactionCode: order.transactionCode,
-                                        customerName: updatedOrder.customerName || ''
-                                    },
-                                    android: { priority: 'high' }
-                                };
-                                await admin.messaging().send(payloadFcm);
-                                console.log(`📲 FCM sent for Midtrans payment: ${order.transactionCode}`);
+                            if (_ioMT) {
+                                _ioMT.emit('order_update', { transactionCode: _orderTCMT, status: 'Paid', source: 'webhook-midtrans' });
+                                _ioMT.to(_orderTCMT).emit('order_update', { transactionCode: _orderTCMT, status: 'Paid', source: 'webhook-midtrans-direct' });
+
+                                if (_orderStatusMT === 'WaitingPayment') {
+                                    _ioMT.emit('new_order', _updatedOrderMT);
+                                    if (_updatedOrderMT.storeId) {
+                                        _ioMT.to(`store_${_updatedOrderMT.storeId}`).emit('new_order', _updatedOrderMT);
+                                    }
+                                }
                             }
-                        } catch (fcmError) {
-                            console.error('FCM Midtrans Notification Error:', fcmError.message);
+
+                            if (_updatedOrderMT.storeId) {
+                                let storeData = null;
+                                try {
+                                    storeData = await prisma.store.findUnique({
+                                        where: { id: _updatedOrderMT.storeId },
+                                        include: { owner: true }
+                                    });
+                                    const fcmToken = storeData?.owner?.fcmToken;
+                                    if (fcmToken) {
+                                        const tableName = _updatedOrderMT.table?.name || 'Takeaway';
+                                        const itemCount = _updatedOrderMT.items?.length || 0;
+                                        const payloadFcm = {
+                                            token: fcmToken,
+                                            data: {
+                                                type: 'new_order',
+                                                title: 'Pesanan Baru (Midtrans): ' + tableName,
+                                                body: `Pembayaran Midtrans Rp ${_updatedOrderMT.totalAmount?.toLocaleString('id-ID')} diterima. ${itemCount} menu.`,
+                                                transactionCode: _orderTCMT,
+                                                customerName: _updatedOrderMT.customerName || ''
+                                            },
+                                            android: { priority: 'high' }
+                                        };
+                                        await admin.messaging().send(payloadFcm);
+                                        console.log(`📲 FCM sent for Midtrans payment: ${_orderTCMT}`);
+                                    }
+                                } catch (fcmError) {
+                                    console.error('FCM Midtrans Notification Error:', fcmError.message);
+                                }
+                            }
+                        } catch (bgErr) {
+                            console.error('[Midtrans Webhook] Background task error:', bgErr.message);
                         }
-                    }
-                    return res.status(200).json({ status: 'ok', message: 'Order Paid via Midtrans' });
+                    }, 0);
+                    return; // Already responded above
                 } else if (order && order.paymentStatus === 'Paid') {
                     // Already Paid
                     console.log(`[Midtrans Webhook] Order ${actualOrderId} already paid`);
@@ -456,7 +492,7 @@ const handleCallback = async (req, res) => {
     }
 };
 
-// 3. Status Polling Backup
+// 3. Status Polling Backup (DB-ONLY — NO external API calls)
 const checkStatus = async (req, res) => {
     const { orderId } = req.params;
 
@@ -465,108 +501,21 @@ const checkStatus = async (req, res) => {
     const actualOrderId = orderId.split('_MD_')[0];
 
     try {
-        const localOrder = await prisma.order.findUnique({ where: { transactionCode: actualOrderId } });
+        // PERFORMANCE: Only query local DB. Webhook handles Midtrans status updates.
+        const localOrder = await prisma.order.findUnique({
+            where: { transactionCode: actualOrderId },
+            select: { paymentStatus: true }
+        });
 
         if (localOrder && localOrder.paymentStatus === 'Paid') {
             return res.json({ success: true, status: 'Paid', message: 'Verified from Local DB' });
         }
 
-        const result = await fetchTransactionStatus(orderId); // Panggil Midtrans pakai full ID
-
-        if (result && isSuccessStatus(result.transaction_status)) {
-            const order = localOrder || await prisma.order.findUnique({ where: { transactionCode: actualOrderId } });
-
-            if (order && order.paymentStatus !== 'Paid') {
-                const newStatus = order.status === 'WaitingPayment' ? 'Pending' : order.status;
-
-                let generatedQueueNumber = order.queueNumber;
-                if (order.status === 'WaitingPayment' && (!order.queueNumber || order.queueNumber === 0)) {
-                    const parts = new Intl.DateTimeFormat('en-US', {
-                        timeZone: 'Asia/Jakarta', year: 'numeric', month: 'numeric', day: 'numeric'
-                    }).formatToParts(new Date());
-
-                    const wib = {};
-                    parts.forEach(p => wib[p.type] = p.value);
-                    const todayStart = new Date(Date.UTC(wib.year, wib.month - 1, wib.day, -7, 0, 0, 0));
-
-                    const whereQueue = { status: { in: ['Pending', 'Processing'] } };
-                    if (order.storeId) whereQueue.storeId = order.storeId;
-                    whereQueue.createdAt = { gte: todayStart };
-
-                    const activeQueueCount = await prisma.order.count({ where: whereQueue });
-                    generatedQueueNumber = activeQueueCount + 1;
-                }
-
-                const updatedOrder = await prisma.order.update({
-                    where: { transactionCode: actualOrderId },
-                    data: { paymentStatus: 'Paid', status: newStatus, queueNumber: generatedQueueNumber },
-                    include: { table: { include: { location: true } }, items: { include: { product: true } } }
-                });
-
-                if (req.io) {
-                    // Beritahu frontend memakai full orderId dan actualOrderId agar dua-duanya nge-trigger sukses
-                    req.io.emit('order_update', { transactionCode: orderId, status: 'Paid' });
-                    req.io.emit('order_update', { transactionCode: actualOrderId, status: 'Paid' });
-                    
-                    req.io.to(orderId).emit('order_update', { transactionCode: orderId, status: 'Paid', source: 'polling-midtrans' });
-                    req.io.to(actualOrderId).emit('order_update', { transactionCode: actualOrderId, status: 'Paid', source: 'polling-direct' });
-
-                    if (order.status === 'WaitingPayment') {
-                        req.io.emit('new_order', updatedOrder);
-                        if (updatedOrder.storeId) {
-                            req.io.to(`store_${updatedOrder.storeId}`).emit('new_order', updatedOrder);
-                        }
-                    }
-                }
-
-                // --- FCM PUSH NOTIFICATION (Polling Payment Confirm) ---
-                if (updatedOrder.storeId && order.status === 'WaitingPayment') {
-                    let storeData = null;
-                    try {
-                        storeData = await prisma.store.findUnique({
-                            where: { id: updatedOrder.storeId },
-                            include: { owner: true }
-                        });
-                        const fcmToken = storeData?.owner?.fcmToken;
-                        if (fcmToken) {
-                            const tableName = updatedOrder.table?.name || 'Takeaway';
-                            const payload = {
-                                token: fcmToken,
-                                data: {
-                                    type: 'new_order',
-                                    title: 'Pesanan Baru (QRIS): ' + tableName,
-                                    body: `Pembayaran QRIS diterima. ${updatedOrder.items?.length || 0} menu.`,
-                                    transactionCode: orderId,
-                                    customerName: updatedOrder.customerName || ''
-                                },
-                                android: {
-                                    priority: 'high'
-                                }
-                            };
-                            await admin.messaging().send(payload);
-                            console.log(`📲 FCM sent for polling payment confirm: ${orderId}`);
-                        }
-                    } catch (fcmError) {
-                        console.error('FCM Polling Notification Error:', fcmError.message);
-                        if (fcmError?.errorInfo?.code === 'messaging/registration-token-not-registered') {
-                            try {
-                                const ownerId = storeData?.owner?.id;
-                                if (ownerId) {
-                                    await prisma.user.update({ where: { id: ownerId }, data: { fcmToken: null } });
-                                    console.warn(`🗑️ Stale FCM token cleared for user ${ownerId}`);
-                                }
-                            } catch (cleanErr) { console.error('FCM token cleanup error:', cleanErr.message); }
-                        }
-                    }
-                }
-            }
-            return res.json({ success: true, status: 'Paid' });
-        }
-
-        res.json({ success: true, status: 'Pending', raw_status: result?.transaction_status });
+        // Not paid yet — webhook hasn't fired
+        res.json({ success: true, status: 'Pending' });
 
     } catch (error) {
-        console.error("[Midtrans] Check Status Error:", error);
+        console.error("[Check Status] DB Error:", error);
         res.status(500).json({ success: false });
     }
 };
