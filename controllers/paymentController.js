@@ -427,14 +427,14 @@ const handleCallback = async (req, res) => {
                     return res.status(200).json({ status: 'ok', message: 'Order Paid via Midtrans' });
                 } else if (order && order.paymentStatus === 'Paid') {
                     // Already Paid
-                    console.log(`[Midtrans Webhook] Order ${orderId} already paid`);
+                    console.log(`[Midtrans Webhook] Order ${actualOrderId} already paid`);
                     return res.status(200).json({ status: 'ok', message: 'Order already paid' });
                 } else {
-                    console.error(`[Midtrans Webhook] NO MATCH for Midtrans orderId: ${orderId}`);
+                    console.error(`[Midtrans Webhook] NO MATCH for Midtrans orderId: ${actualOrderId}`);
                     return res.status(200).json({ status: 'ignored', message: 'No order matched this Midtrans ID' });
                 }
             } else {
-                console.log(`[Midtrans Webhook] Ignored non-success status: ${status} for ${orderId}`);
+                console.log(`[Midtrans Webhook] Ignored non-success status: ${status} for ${actualOrderId}`);
                 return res.status(200).json({ status: 'ok', message: 'Ignored status' });
             }
         }
