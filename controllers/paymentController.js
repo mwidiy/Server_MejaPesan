@@ -100,31 +100,34 @@ const createTransaction = async (req, res) => {
                 // PENTING: Gunakan suffix '_MD_' + timestamp agar Midtrans tidak menolak duplicate order_id (error 406) saat di-refresh!
                 const midtransOrderId = `${orderId.toString()}_MD_${Date.now()}`;
                 
-                // Gunakan SNAP API untuk menampilkan payment popup alih-alih mengambil string QR
-                // Ini menghilangkan error 402 karena opsi payment type dihandle Midtrans langsung
-                const parameter = {
+                // Gunakan CORE API untuk mendapatkan QR String / Image secara native
+                const qrisParam = {
+                    payment_type: "qris",
                     transaction_details: {
                         order_id: midtransOrderId,
                         gross_amount: Math.round(amount)
                     },
-                    customer_details: {
-                        first_name: "Customer",
+                    qris: {
+                        acquirer: "gopay"
                     }
                 };
 
-                const transaction = await snapApi.createTransaction(parameter);
+                const chargeResponse = await coreApi.charge(qrisParam);
                 
-                if (!transaction.redirect_url) {
-                    console.error("[Midtrans Snap] Response missing URL:", transaction);
-                    throw new Error("Midtrans tidak mengembalikan Snap URL.");
+                // qris / gopay mengembalikan tipe actions "generate-qr-code"
+                const qrAction = chargeResponse.actions?.find(a => a.name === 'generate-qr-code');
+                
+                if (!qrAction || !qrAction.url) {
+                    console.error("[Midtrans Core] Response missing QR URL:", chargeResponse);
+                    throw new Error("Midtrans tidak mengembalikan link QR Code.");
                 }
 
-                console.log(`[Midtrans Snap] Generated URL for Order ${midtransOrderId}`);
+                console.log(`[Midtrans Core] Generated QR URL for Order ${midtransOrderId}`);
 
                 return res.json({
                     success: true,
                     data: {
-                        paymentUrl: transaction.redirect_url, // Kembalikan ke format paymentUrl agar frontend nge-handle sbg popup
+                        qrString: qrAction.url, // Endpoint gambar QRCode
                         amount: Math.round(amount),
                         orderId: midtransOrderId, // Frontend akan menggunakan orderId Midtrans ini
                         gateway: 'midtrans',
