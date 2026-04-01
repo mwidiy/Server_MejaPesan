@@ -82,13 +82,21 @@ const RAW_STATIC_QRIS = "00020101021126610014COM.GO-JEK.WWW011893600914395596007
 
 // 1. Create Transaction (Get QR Data)
 const createTransaction = async (req, res) => {
-    const { orderId, amount, gateway = 'homemade' } = req.body;
+    const { orderId, amount } = req.body; // Remove gateway from destructuring
 
     if (!orderId || !amount) {
         return res.status(400).json({ success: false, message: 'Missing orderId or amount' });
     }
 
     try {
+        // --- AMBIL GLOBAL CONFIG DARI DATABASE ---
+        let gateway = 'homemade'; // Default
+        const config = await prisma.systemConfig.findUnique({
+            where: { key: 'GLOBAL_PAYMENT_GATEWAY' }
+        });
+        if (config && config.value) {
+            gateway = config.value;
+        }
         const order = await prisma.order.findUnique({ where: { transactionCode: orderId.toString() } });
         if (order && order.paymentStatus === 'Paid') {
             return res.json({ success: true, status: 'Paid', message: 'Order already paid' });

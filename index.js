@@ -235,6 +235,7 @@ app.use('/api/auth', require('./routes/authRoutes')); // NEW: Google Login Route
 app.use('/api/payment', require('./routes/paymentRoutes')); // Duitku Payment
 app.use('/api/payments', require('./routes/paymentRoutes')); // ALIAS/WEBHOOK FIX: Duitku/Pakasir Webhook with "s" 
 app.use('/api/withdraw', require('./routes/withdrawalRoutes')); // NEW: Withdrawal
+app.use('/api/system-config', require('./routes/systemConfigRoutes')); // NEW: Super Admin Config
 
 // --- PRIORITAS 5: GLOBAL ERROR HANDLER (PENUTUP AIB) ---
 // Middleware ini ditaruh PALING BAWAH setelah semua Route.

@@ -210,3 +210,10 @@ model ArAsset {
   storeId   Int
   store     Store    @relation(fields: [storeId], references: [id])
 }
+
+// 8. GLOBAL CONFIGURATION (SUPER ADMIN)
+model SystemConfig {
+  key       String   @id // contoh: "GLOBAL_PAYMENT_GATEWAY"
+  value     String       // contoh: "midtrans" atau "homemade"
+  updatedAt DateTime @updatedAt
+}
