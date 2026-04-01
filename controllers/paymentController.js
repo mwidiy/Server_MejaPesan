@@ -114,17 +114,19 @@ const createTransaction = async (req, res) => {
 
                 const transaction = await snapApi.createTransaction(parameter);
                 
-                if (!transaction.redirect_url) {
-                    console.error("[Midtrans Snap] Response missing URL:", transaction);
-                    throw new Error("Midtrans tidak mengembalikan Snap URL.");
+                if (!transaction.token) {
+                    console.error("[Midtrans Snap] Response missing token:", transaction);
+                    throw new Error("Midtrans tidak mengembalikan Snap Token.");
                 }
 
-                console.log(`[Midtrans Snap] Generated URL for Order ${midtransOrderId}`);
+                console.log(`[Midtrans Snap] Generated Token for Order ${midtransOrderId}`);
 
                 return res.json({
                     success: true,
                     data: {
-                        paymentUrl: transaction.redirect_url, // Kembalikan ke format paymentUrl agar frontend nge-handle sbg popup
+                        snapToken: transaction.token, // Gunakan snapToken untuk popup JS
+                        clientKey: process.env.MIDTRANS_CLIENT_KEY,
+                        isProduction: process.env.MIDTRANS_IS_PRODUCTION === 'true',
                         amount: Math.round(amount),
                         orderId: midtransOrderId, // Frontend akan menggunakan orderId Midtrans ini
                         gateway: 'midtrans',
