@@ -84,82 +84,49 @@ function generateDynamicQris(staticQR, amount) {
 
 const RAW_STATIC_QRIS = "00020101021126610014COM.GO-JEK.WWW01189360091439559600780210G9559600780303UMI51440014ID.CO.QRIS.WWW0215ID10254109926280303UMI5204899953033605802ID5925MUHAMAD WIDIYANTO, Digita6008PEMALANG61055235362070703A0163046140";
 
-// 1. Create Transaction (Get QR Data)
-const createTransaction = async (req, res) => {
-    const { orderId, amount } = req.body; // Remove gateway from destructuring
-
-    if (!orderId || !amount) {
-        return res.status(400).json({ success: false, message: 'Missing orderId or amount' });
-    }
-
+// Helper: Generate Midtrans Snap Token
+const getMidtransSnapToken = async (orderId, amount) => {
     try {
-        // --- AMBIL GLOBAL CONFIG DARI DATABASE ---
-        let gateway = 'homemade'; // Default
-        const config = await prisma.systemConfig.findUnique({
-            where: { key: 'GLOBAL_PAYMENT_GATEWAY' }
-        });
-        if (config && config.value) {
-            gateway = config.value;
-        }
-        const order = await prisma.order.findUnique({ where: { transactionCode: orderId.toString() } });
-        if (order && order.paymentStatus === 'Paid') {
-            return res.json({ success: true, status: 'Paid', message: 'Order already paid' });
-        }
-
-        // --- MIDTRANS GATEWAY LOGIC ---
-        if (gateway === 'midtrans') {
-            try {
-                // PENTING: Gunakan suffix '_MD_' + timestamp agar Midtrans tidak menolak duplicate order_id (error 406) saat di-refresh!
-                const midtransOrderId = `${orderId.toString()}_MD_${Date.now()}`;
-                
-                // Gunakan SNAP API untuk menampilkan payment popup alih-alih mengambil string QR
-                // Ini menghilangkan error 402 karena opsi payment type dihandle Midtrans langsung
-                const parameter = {
-                    transaction_details: {
-                        order_id: midtransOrderId,
-                        gross_amount: Math.round(amount)
-                    },
-                    customer_details: {
-                        first_name: "Customer",
-                    }
-                };
-
-                const transaction = await snapApi.createTransaction(parameter);
-                
-                if (!transaction.token) {
-                    console.error("[Midtrans Snap] Response missing token:", transaction);
-                    throw new Error("Midtrans tidak mengembalikan Snap Token.");
-                }
-
-                console.log(`[Midtrans Snap] Generated Token for Order ${midtransOrderId}`);
-
-                return res.json({
-                    success: true,
-                    data: {
-                        snapToken: transaction.token, // Gunakan snapToken untuk popup JS
-                        clientKey: process.env.MIDTRANS_CLIENT_KEY,
-                        isProduction: process.env.MIDTRANS_IS_PRODUCTION === 'true',
-                        amount: Math.round(amount),
-                        orderId: midtransOrderId, // Frontend akan menggunakan orderId Midtrans ini
-                        gateway: 'midtrans',
-                        expiry: new Date(Date.now() + 15 * 60000).toISOString()
-                    }
-                });
-            } catch (midError) {
-                console.error("[Midtrans] Create Error Detail:", midError.ApiResponse ? midError.ApiResponse : midError.message);
-                const errMsg = midError.ApiResponse?.error_messages ? midError.ApiResponse.error_messages.join(', ') : (midError.message || 'Error internal Midtrans');
-                return res.status(500).json({ success: false, message: `Gagal ke Midtrans: ${errMsg}` });
+        const midtransOrderId = `${orderId.toString()}_MD_${Date.now()}`;
+        const parameter = {
+            transaction_details: {
+                order_id: midtransOrderId,
+                gross_amount: Math.round(amount)
+            },
+            customer_details: {
+                first_name: "Customer",
             }
-        }
+        };
 
-        // --- CUSTOM PG UNIQUE CODE LOGIC (SMART SEQUENTIAL + CACHE) ---
+        const transaction = await snapApi.createTransaction(parameter);
+        if (!transaction.token) throw new Error("Midtrans tidak mengembalikan Snap Token.");
+
+        return {
+            snapToken: transaction.token,
+            clientKey: process.env.MIDTRANS_CLIENT_KEY,
+            isProduction: process.env.MIDTRANS_IS_PRODUCTION === 'true',
+            amount: Math.round(amount),
+            finalAmount: Math.round(amount),
+            orderId: midtransOrderId,
+            gateway: 'midtrans',
+            expiry: new Date(Date.now() + 15 * 60000).toISOString()
+        };
+    } catch (midError) {
+        console.error("[Midtrans Helper] Error:", midError.message);
+        throw midError;
+    }
+};
+
+// Helper: Generate Custom QRIS with Unique Code
+const getCustomQRIS = async (orderId, amount, currentOrderTotal) => {
+    try {
         let baseAmount = Math.round(amount);
         let finalAmount = baseAmount;
         let shouldGenerateNew = true;
-        
-        // Prevent re-generating unique code on refresh for the SAME order
-        if (order.totalAmount > baseAmount && (order.totalAmount - baseAmount) <= 999) {
-            finalAmount = order.totalAmount;
+
+        // Prevent re-generating unique code if already present (within 1-999 range)
+        if (currentOrderTotal > baseAmount && (currentOrderTotal - baseAmount) <= 999) {
+            finalAmount = currentOrderTotal;
             shouldGenerateNew = false;
         }
 
@@ -168,7 +135,6 @@ const createTransaction = async (req, res) => {
             let usedCodes = uniqueCodeCache.get(cacheKey);
 
             if (!usedCodes) {
-                // Cache MISS: Seed from DB (cold start / first request for this amount)
                 const sixMinutesAgo = new Date(Date.now() - 6 * 60 * 1000);
                 const activeSimilarOrders = await prisma.order.findMany({
                     where: {
@@ -183,46 +149,69 @@ const createTransaction = async (req, res) => {
                 usedCodes = activeSimilarOrders.map(o => o.totalAmount - baseAmount);
             }
 
-            // Convert to Set for O(1) lookup
             const usedSet = new Set(usedCodes);
-
-            // Find the smallest available code starting from 1
             let uniqueCode = 1;
             while (usedSet.has(uniqueCode)) {
                 uniqueCode++;
-                if (uniqueCode > 999) {
-                    throw new Error("Antrean pembayaran penuh, coba lagi dalam beberapa menit.");
-                }
+                if (uniqueCode > 999) throw new Error("Antrean pembayaran penuh, coba lagi dalam beberapa menit.");
             }
-            
-            finalAmount = baseAmount + uniqueCode;
 
-            // Update cache with new code claimed (persist for next concurrent request)
+            finalAmount = baseAmount + uniqueCode;
             usedCodes = [...(Array.isArray(usedCodes) ? usedCodes : []), uniqueCode];
             uniqueCodeCache.set(cacheKey, usedCodes);
-            
+
+            // Update local DB with final amount (this reflects the unique code)
             await prisma.order.update({
-                where: { id: order.id },
+                where: { transactionCode: orderId.toString() },
                 data: { totalAmount: finalAmount }
             });
         }
 
-        // --- GENERATE DYNAMIC QRIS STRING ---
         let dynamicQrisString = generateDynamicQris(RAW_STATIC_QRIS, finalAmount);
-        console.log(`[Custom PG] Generated QRIS for Order ${orderId} | Nominal: Rp ${finalAmount}`);
+        return {
+            qrString: dynamicQrisString,
+            amount: finalAmount,
+            finalAmount: finalAmount,
+            orderId: orderId,
+            expiry: new Date(Date.now() + 10 * 60000).toISOString(),
+            gateway: 'homemade'
+        };
+    } catch (error) {
+        console.error("[Custom PG Helper] Error:", error.message);
+        throw error;
+    }
+};
 
-        return res.json({
-            success: true,
-            data: {
-                qrString: dynamicQrisString, 
-                amount: finalAmount,
-                orderId: orderId,
-                expiry: new Date(Date.now() + 10 * 60000).toISOString()
-            }
+// 1. Create Transaction (Get QR Data)
+const createTransaction = async (req, res) => {
+    const { orderId, amount } = req.body;
+
+    if (!orderId || !amount) {
+        return res.status(400).json({ success: false, message: 'Missing orderId or amount' });
+    }
+
+    try {
+        let gateway = 'homemade';
+        const config = await prisma.systemConfig.findUnique({
+            where: { key: 'GLOBAL_PAYMENT_GATEWAY' }
         });
+        if (config && config.value) gateway = config.value;
+
+        const order = await prisma.order.findUnique({ where: { transactionCode: orderId.toString() } });
+        if (order && order.paymentStatus === 'Paid') {
+            return res.json({ success: true, status: 'Paid', message: 'Order already paid' });
+        }
+
+        if (gateway === 'midtrans') {
+            const data = await getMidtransSnapToken(orderId, amount);
+            return res.json({ success: true, data });
+        } else {
+            const data = await getCustomQRIS(orderId, amount, order.totalAmount);
+            return res.json({ success: true, data });
+        }
 
     } catch (error) {
-        console.error("[Custom PG] Create Error:", error.message || error);
+        console.error("[Create Transaction] Error:", error.message);
         res.status(500).json({ success: false, message: error.message || "Internal Server Error" });
     }
 };
@@ -559,5 +548,7 @@ module.exports = {
     createTransaction,
     handleCallback,
     checkStatus,
-    expireOrder
+    expireOrder,
+    getMidtransSnapToken,
+    getCustomQRIS
 };

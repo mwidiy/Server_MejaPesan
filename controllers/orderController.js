@@ -3,10 +3,66 @@ const prisma = new PrismaClient();
 const PDFDocument = require('pdfkit');
 const NodeCache = require('node-cache');
 const admin = require('../utils/firebase');
+const { getMidtransSnapToken, getCustomQRIS } = require('./paymentController');
 // Ensure you have ran: npm install pdfkit
 
 // L1 Pricing Cache (TTL: 60 seconds). Bypass DB for extreme checkout latency.
 const pricingCache = new NodeCache({ stdTTL: 60, checkperiod: 10 });
+
+// TASK 2: State global di RAM untuk caching antrean (Queue Calculation Offloading)
+const storeQueueTimeCache = new NodeCache({ stdTTL: 300, checkperiod: 60 }); // 5 min TTL
+
+// Helper: Calculate and update queue cache for a store
+const updateStoreQueueTimeCache = async (storeId) => {
+    if (!storeId) return;
+    try {
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const utcTodayStart = new Date(todayStart.getTime() - (7 * 60 * 60 * 1000));
+
+        // Get all Pending & Processing orders for the store today
+        // Note: position and ahead time are usually based on Pending orders
+        const pendingOrders = await prisma.order.findMany({
+            where: {
+                storeId: parseInt(storeId),
+                status: 'Pending',
+                createdAt: { gte: utcTodayStart }
+            },
+            include: { items: { include: { product: true } } },
+            orderBy: { createdAt: 'asc' }
+        });
+
+        let cumulativePrepTime = 0;
+        const orderMap = {};
+
+        pendingOrders.forEach((order, index) => {
+            let orderPrep = 20; // Default
+            if (order.items && order.items.length > 0) {
+                orderPrep = Math.max(...order.items.map(i => i.product?.prepTime || 20));
+            }
+            
+            // For the first person, minutesAhead is 0. 
+            // For the second, minutesAhead is the first person's prepTime, etc.
+            orderMap[order.transactionCode] = {
+                position: index + 1,
+                minutesAhead: cumulativePrepTime,
+                myPrepTime: orderPrep
+            };
+            
+            cumulativePrepTime += orderPrep;
+        });
+
+        storeQueueTimeCache.set(`store_${storeId}`, {
+            totalWorkload: cumulativePrepTime,
+            orderMap: orderMap,
+            lastUpdated: Date.now()
+        });
+        
+        console.log(`[Queue Cache] Updated for Store ${storeId}. Pending: ${pendingOrders.length}, Workload: ${cumulativePrepTime}m`);
+    } catch (err) {
+        console.error(`[Queue Cache] Error updating for Store ${storeId}:`, err.message);
+    }
+};
 
 // Helper untuk generate Transaction Code
 // Format: TRX-[YYYYMMDD]-[RANDOM4DIGIT] (Contoh: TRX-20240101-A1B2)
@@ -341,9 +397,41 @@ const createOrder = async (req, res) => {
             console.log(`Creating WaitingPayment Order ${newOrder.transactionCode} (QRIS/Cash PRE) - No Socket Emit yet`);
         }
 
+        // TASK 1: ONE-TRIP CHECKOUT (Pre-Generate Payment)
+        let paymentData = null;
+        if (paymentMethod === 'qris') {
+            try {
+                // Determine Gateway (Mirroring paymentController logic)
+                let gateway = 'homemade';
+                const config = await prisma.systemConfig.findUnique({ where: { key: 'GLOBAL_PAYMENT_GATEWAY' } });
+                if (config && config.value) gateway = config.value;
+
+                if (gateway === 'midtrans') {
+                    paymentData = await getMidtransSnapToken(newOrder.transactionCode, newOrder.totalAmount);
+                } else {
+                    // Update: Pass current totalAmount correctly
+                    paymentData = await getCustomQRIS(newOrder.transactionCode, newOrder.totalAmount, newOrder.totalAmount);
+                }
+                
+                // If payment generation updated the amount (local PG unique code), we reload order if necessary
+                // But usually, the client will just use paymentData.amount
+                console.log(`[One-Trip] Generated ${gateway} data for ${newOrder.transactionCode}`);
+            } catch (err) {
+                console.error("[One-Trip] Error pre-generating payment:", err.message);
+            }
+        }
+
+        // TASK 2: BACKGROUND QUEUE CACHE UPDATE (Recalculate wait time)
+        if (storeId) {
+            updateStoreQueueTimeCache(storeId);
+        }
+
         res.status(201).json({
             message: 'Order created successfully',
-            data: newOrder
+            data: {
+                ...newOrder,
+                paymentData // Injecting payment data as requested in Tugas 1
+            }
         });
 
     } catch (error) {
@@ -509,6 +597,15 @@ const updateOrderStatus = async (req, res) => {
                         req.io.to(`store_${updatedOrder.storeId}`).emit('new_order', updatedOrder);
                     }
                     console.log(`📡 Emitted 'new_order' (Post-Verification): ${updatedOrder.transactionCode}`);
+                    
+                    // TASK 2: BACKGROUND QUEUE CACHE UPDATE when order enters queue
+                    updateStoreQueueTimeCache(updatedOrder.storeId);
+                }
+
+                // TASK 2: BACKGROUND QUEUE CACHE UPDATE when order is completed
+                if (updatedOrder.status === 'Completed' || dataToUpdate.status === 'Completed') {
+                    updateStoreQueueTimeCache(updatedOrder.storeId);
+                    console.log(`[Queue Update] Re-calculating queue for store ${updatedOrder.storeId} (Completed Order)`);
                 }
             }, 0);
         }
@@ -586,60 +683,37 @@ const getOrderByTransactionCode = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Order not found' });
         }
 
-        // SMART QUEUE 3.0: Predictive Time & Dynamic Position
-        // 1. Get ALL orders ahead (Pending/Processing) to sum their prep times
-        const queueWhere = {
-            createdAt: {
-                lt: order.createdAt,
-                gte: new Date(new Date().setHours(0, 0, 0, 0))
-            },
-            status: 'Pending' // User Request 5.0: Only Pending counts as "Queue"
-        };
+        // TASK 2: SMART QUEUE 4.0 - QUEUE CALCULATION OFFLOADING
+        // Instead of DB queries, we use RAM-based cache for extreme speed and lower DB load.
+        const storeCache = storeQueueTimeCache.get(`store_${order.storeId}`);
+        const orderQueueData = storeCache?.orderMap?.[order.transactionCode];
 
-        // Fix: Scope by StoreID
-        if (order.storeId) {
-            queueWhere.storeId = order.storeId;
-        }
-
-        const ordersQueue = await prisma.order.findMany({
-            where: queueWhere,
-            include: { items: { include: { product: true } } }
-        });
-
-        const queuePosition = ordersQueue.length + 1; // My position (1-based)
-
-        // 2. Calculate Cumulative Prep Time
-        // Logic: Sum of max prep time per order in queue + my order
         let totalMinutesAhead = 0;
-
-        // A. Duration of orders ahead
-        for (const qOrder of ordersQueue) {
-            let orderPrep = 20; // Default buffer
-            if (qOrder.items && qOrder.items.length > 0) {
-                // Take max prep time of items in that order (parallel prep). Fix 39: Poisoned Queue Guard
-                const maxP = Math.max(...qOrder.items.map(i => i.product?.prepTime || 20));
-                orderPrep = maxP;
-            }
-            totalMinutesAhead += orderPrep;
-        }
-
-        // B. Duration of MY order
+        let queuePosition = 1;
         let myPrep = 20;
+
         if (order.items && order.items.length > 0) {
-            myPrep = Math.max(...order.items.map(i => i.product?.prepTime || 20)); // Fix 39: Guard
+            myPrep = Math.max(...order.items.map(i => i.product?.prepTime || 20));
         }
 
-        // C. Total Service Time Calculation (TAHAP 38: Smart Queue Time Prediction Fix)
-        // If system is idle, starts from Order Creation time (NOT new Date() to avoid moving target on refresh)
-        const baseTime = new Date(order.createdAt); // Fix 1: Locked base time
-        const predictedTime = new Date(baseTime.getTime() + (totalMinutesAhead + myPrep) * 60000);
+        if (orderQueueData) {
+            totalMinutesAhead = orderQueueData.minutesAhead;
+            queuePosition = orderQueueData.position;
+            console.log(`[Queue Cache] HIT: ${order.transactionCode} (Pos: ${queuePosition}, Ahead: ${totalMinutesAhead}m)`);
+        } else {
+            // Background update if cache is missing/stale
+            if (order.storeId) updateStoreQueueTimeCache(order.storeId);
+            console.warn(`[Queue Cache] MISS for ${order.transactionCode} (Store: ${order.storeId}). Cache is likely empty.`);
+        }
 
-        // Fix 2: Force WIB Timezone (UTC+7) manually to avoid Intl.DateTimeFormat crashing on minimal Node servers (e.g. Alpine Linux on Koyeb)
-        const utcMillis = predictedTime.getTime();
-        const wibMillis = utcMillis + (7 * 60 * 60 * 1000); // Add 7 hours manually
+        // Calculation of Clock Time using the same logic as before (UTC+7)
+        const baseTime = new Date(order.createdAt);
+        const totalWaitTime = totalMinutesAhead + myPrep;
+        const predictedTime = new Date(baseTime.getTime() + totalWaitTime * 60000);
+
+        const wibMillis = predictedTime.getTime() + (7 * 60 * 60 * 1000);
         const wibDate = new Date(wibMillis);
 
-        // Extract using getUTC to get the shifted time
         const hours = String(wibDate.getUTCHours()).padStart(2, '0');
         const minutes = String(wibDate.getUTCMinutes()).padStart(2, '0');
         const clockTime = `${hours}:${minutes}`;
@@ -648,9 +722,9 @@ const getOrderByTransactionCode = async (req, res) => {
             success: true,
             data: {
                 ...order,
-                queuePosition: queuePosition, // Explicit Position (1, 2, 3)
-                ordersAhead: ordersQueue.length, // 0 means I am next/processing
-                predictedServiceTime: clockTime // "12:30"
+                queuePosition: queuePosition,
+                ordersAhead: Math.max(0, queuePosition - 1),
+                predictedServiceTime: clockTime
             }
         });
     } catch (error) {
