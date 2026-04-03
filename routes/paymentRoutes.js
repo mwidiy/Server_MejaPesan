@@ -8,8 +8,8 @@ router.post('/create-transaction', paymentController.createTransaction);
 // 2. Webhook Callback
 // Pakasir sends URL-encoded or JSON. Express handles JSON by default, 
 // Safest to add both middleware in index.js or specific here.
-router.post('/callback', express.urlencoded({ extended: true }), paymentController.handleCallback);
-router.post('/webhook', express.urlencoded({ extended: true }), paymentController.handleCallback); // Webhook Alias
+router.post('/callback', express.json(), express.urlencoded({ extended: true }), paymentController.handleCallback);
+router.post('/webhook', express.json(), express.urlencoded({ extended: true }), paymentController.handleCallback); // Webhook Alias
 
 // 3. Polling Status (Backup)
 // 3. Polling Status (Backup)
