@@ -57,13 +57,7 @@ const globalLimiter = rateLimit({
 });
 
 // Pasang Satpam (Limiter) HANYA untuk semua jalur API (bukan gambar/assets)
-// EXCEPTION: Abaikan Rate Limiter untuk Webhook/Callback agar tidak memblokir notifikasi Midtrans/Duitku
-app.use('/api/', (req, res, next) => {
-  if (req.originalUrl && (req.originalUrl.includes('/webhook') || req.originalUrl.includes('/callback'))) {
-    return next();
-  }
-  globalLimiter(req, res, next);
-});
+app.use('/api/', globalLimiter);
 
 const corsOptions = {
   // CORS Dinamis (Lebih Aman!)
@@ -94,19 +88,12 @@ const corsOptions = {
 
 // Custom CORS Wrapper to by-pass specific webhooks
 app.use((req, res, next) => {
-  // 1. PERKECUALIAN KHUSUS WEBHOOK TELEGRAM/WA & MIDTRANS/DUITKU
-  // Jika URL yang diakses adalah proses pencairan saldo atau webhook payment, matikan CORS
-  const isWebhook = req.originalUrl && (
-    req.originalUrl.includes('/api/withdraw/process') || 
-    req.originalUrl.includes('/api/payment/callback') || 
-    req.originalUrl.includes('/api/payments/webhook') || 
-    req.originalUrl.includes('/api/payment')
-  );
-
-  if (isWebhook) {
+  // 1. PERKECUALIAN KHUSUS WEBHOOK TELEGRAM/WA
+  // Jika URL yang diakses adalah proses pencairan saldo, matikan CORS
+  // (Aman karena route di bawah dilindungi HMAC SHA-256 Auth Token)
+  if (req.originalUrl && req.originalUrl.includes('/api/withdraw/process')) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     if (req.method === 'OPTIONS') return res.sendStatus(200);
     return next();
   }
