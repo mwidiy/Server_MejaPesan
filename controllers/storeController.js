@@ -42,11 +42,11 @@ const getStore = async (req, res) => {
 // Update Info
 const updateStore = async (req, res) => {
     try {
-        const { name, isOpen, bankName, bankNumber, bankHolder, ewalletType, ewalletNumber, ewalletName, whatsappNumber, isKasirQrVerificationEnabled, cashPaymentMode } = req.body;
+        let { name, isOpen, bankName, bankNumber, bankHolder, ewalletType, ewalletNumber, ewalletName, whatsappNumber, isKasirQrVerificationEnabled, cashPaymentMode } = req.body;
         if (!req.storeId) return res.status(400).json({ error: 'User tidak memiliki akses Toko' });
 
         // --- HARDENING: SERVER-SIDE VALIDATION & SANITIZATION ---
-        const alphanumericSpaceDashRegex = /^[a-zA-Z0-9 \-]+$/;
+        const alphanumericSpaceDashRegex = /^[a-zA-Z0-9 \-\.,']+$/;
         const numericRegex = /^[0-9]+$/;
         const ewalletTypes = ['Gopay', 'OVO', 'Dana', 'ShopeePay', 'LinkAja'];
 
@@ -66,8 +66,11 @@ const updateStore = async (req, res) => {
             if (bankHolder.length > 50) return res.status(400).json({ error: "Bank Holder Name too long (Max 50)" });
             if (bankHolder.length > 0 && !alphanumericSpaceDashRegex.test(bankHolder)) return res.status(400).json({ error: "Bank Holder Name contains invalid characters" });
         }
-        if (ewalletType !== undefined) {
-            if (ewalletType.length > 0 && !ewalletTypes.includes(ewalletType)) return res.status(400).json({ error: "Invalid E-Wallet Type" });
+        if (ewalletType !== undefined && ewalletType.length > 0) {
+            const matchedType = ewalletTypes.find(t => t.toLowerCase() === ewalletType.toLowerCase());
+            if (!matchedType) return res.status(400).json({ error: "Invalid E-Wallet Type" });
+            // Normalize value for database
+            ewalletType = matchedType;
         }
         if (ewalletNumber !== undefined) {
             if (ewalletNumber.length > 20) return res.status(400).json({ error: "E-Wallet Number too long (Max 20)" });
