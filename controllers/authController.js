@@ -59,10 +59,10 @@ const googleLogin = async (req, res) => {
         } else if (!user.store) {
             // EXISTING USER BUT NO STORE (ZOMBIE USER FIX) 🧟‍♂️ -> 🦸‍♂️
             console.log(`⚠️ User ${email} found but has no Store. Creating default store...`);
-            const firstName = user.name?.split(' ')[0] || 'REST';
+            const initials = (user.name?.split(' ')[0]?.substring(0, 4) || 'REST').toUpperCase();
             const newStore = await prisma.store.create({
                 data: {
-                    name: firstName.substring(0, 4).toUpperCase(),
+                    name: initials, 
                     ownerId: user.id,
                     logo: picture
                 }
@@ -72,15 +72,27 @@ const googleLogin = async (req, res) => {
                 where: { id: user.id },
                 include: { store: true }
             });
-        } else if (user.store.name.length > 10) {
-            // AUTO-FIX: Truncate existing long names to 10 chars (Strict Rule)
-            console.log(`🧹 Auto-fixing Store Name for ${email}: "${user.store.name}" -> Truncated`);
-            const truncatedName = user.store.name.substring(0, 10);
-            await prisma.store.update({
-                where: { id: user.store.id },
-                data: { name: truncatedName }
-            });
-            user.store.name = truncatedName;
+        } else {
+            // EXISTING USER WITH STORE -> CHECK FOR DEFAULT CLEANUP
+            const currentName = user.store.name;
+            const googleName = user.name || "";
+            const isDefaultPattern = currentName.includes("'s Store") || currentName === googleName;
+            
+            if (isDefaultPattern || currentName.length > 10) {
+                // RESET TO 4-CHAR INITIALS if it looks like a default name, OR TRUNCATE if it's just too long
+                const newName = isDefaultPattern 
+                    ? (googleName.split(' ')[0]?.substring(0, 4) || 'REST').toUpperCase()
+                    : currentName.substring(0, 10);
+                
+                if (newName !== currentName) {
+                    console.log(`🧹 Auto-resetting Store Name for ${email}: "${currentName}" -> "${newName}"`);
+                    await prisma.store.update({
+                        where: { id: user.store.id },
+                        data: { name: newName }
+                    });
+                    user.store.name = newName;
+                }
+            }
         }
 
         // 3. Generate JWT
