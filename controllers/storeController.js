@@ -51,8 +51,8 @@ const updateStore = async (req, res) => {
         const ewalletTypes = ['Gopay', 'OVO', 'Dana', 'ShopeePay', 'LinkAja'];
 
         if (name !== undefined) {
-            if (name.length > 50) return res.status(400).json({ error: "Store Name too long (Max 50)" });
-            if (!alphanumericSpaceDashRegex.test(name)) return res.status(400).json({ error: "Store Name contains invalid characters" });
+            if (name.length > 10) return res.status(400).json({ error: "Nama Toko terlalu panjang (Maks 10 huruf)" });
+            if (!alphanumericSpaceDashRegex.test(name)) return res.status(400).json({ error: "Nama Toko mengandung karakter tidak valid" });
         }
         if (bankName !== undefined) {
             if (bankName.length > 30) return res.status(400).json({ error: "Bank Name too long (Max 30)" });

@@ -72,6 +72,15 @@ const googleLogin = async (req, res) => {
                 where: { id: user.id },
                 include: { store: true }
             });
+        } else if (user.store.name.length > 10) {
+            // AUTO-FIX: Truncate existing long names to 10 chars (Strict Rule)
+            console.log(`🧹 Auto-fixing Store Name for ${email}: "${user.store.name}" -> Truncated`);
+            const truncatedName = user.store.name.substring(0, 10);
+            await prisma.store.update({
+                where: { id: user.store.id },
+                data: { name: truncatedName }
+            });
+            user.store.name = truncatedName;
         }
 
         // 3. Generate JWT
