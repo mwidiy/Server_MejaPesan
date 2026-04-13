@@ -54,33 +54,49 @@ const globalLimiter = rateLimit({
   },
   standardHeaders: true, // Kirim info limit di header (RateLimit-*)
   legacyHeaders: false, // Matikan header `X-RateLimit-*` lama
+  // NEW: Whitelist IP Lokal biar gak kena semprot pas lagi testing
+  skip: (req) => {
+    const clientIp = req.ip || req.connection.remoteAddress;
+    return clientIp === '::1' || clientIp === '127.0.0.1' || clientIp === process.env.LOCAL_DEV_IP;
+  }
 });
 
 // Pasang Satpam (Limiter) HANYA untuk semua jalur API (bukan gambar/assets)
 app.use('/api/', globalLimiter);
 
 const corsOptions = {
-  // CORS Dinamis (Lebih Aman!)
   origin: function (origin, callback) {
     // 1. Kasir Android & Postman (Tanpa Origin) diizinkan karena pake perlindungan JWT
     if (!origin || origin === 'null') return callback(null, true);
 
-    // 2. Baca daftar VIP dari .env (Bisa koma-dipisah kalau lebih dari 1)
-    const allowedOrigins = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',') : [];
+    // 2. Ambil daftar VIP dari .env
+    const allowedOrigins = process.env.FRONTEND_URL 
+      ? process.env.FRONTEND_URL.split(',').map(o => o.trim()) 
+      : [];
 
-    // 3. Tambahkan Localhost otomatis buat testing Lokal lu
+    // 3. Otomatis tambahin localhost dan IP lokal yang ada di .env (Kelonggaran buat local dev)
     allowedOrigins.push('http://localhost:3000');
+    allowedOrigins.push('http://localhost:3001');
+    allowedOrigins.push('http://localhost:5173'); // Vite default
+    
+    if (process.env.LOCAL_DEV_IP) {
+      allowedOrigins.push(`http://${process.env.LOCAL_DEV_IP}:3000`);
+      allowedOrigins.push(`http://${process.env.LOCAL_DEV_IP}:3001`);
+      allowedOrigins.push(`http://${process.env.LOCAL_DEV_IP}:5173`);
+    }
+
+    // Origin default produksi
     allowedOrigins.push('https://quacxel.my.id');
     allowedOrigins.push('https://www.quacxel.my.id');
 
-    // 4. Cek apakah KTP (Origin) tamu ada di daftar VIP
+    // 4. Cek apakah origin ada di daftar yang diizinkan
     if (allowedOrigins.includes(origin)) {
-      return callback(null, true); // Masuk!
+      return callback(null, true);
     }
 
     // 5. Tendang web jahat
     console.error(`[BLOCKED_BY_CORS] Website asing mencoba akses: ${origin}`);
-    return callback(new Error('Akses Ditolak Server (Tidak Sah)'), false);
+    return callback(new Error('Akses Ditolak Server (Tidak Sah oleh CORS)'), false);
   },
   methods: ["GET", "POST", "PUT", "DELETE"],
   credentials: true

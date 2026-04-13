@@ -49,7 +49,7 @@ const googleLogin = async (req, res) => {
                     role: 'owner', // Default role
                     store: {
                         create: {
-                            name: `${name}'s Store`, // Default store name
+                            name: (name?.split(' ')[0]?.substring(0, 4) || 'REST').toUpperCase(),
                             logo: picture
                         }
                     }
@@ -59,9 +59,10 @@ const googleLogin = async (req, res) => {
         } else if (!user.store) {
             // EXISTING USER BUT NO STORE (ZOMBIE USER FIX) 🧟‍♂️ -> 🦸‍♂️
             console.log(`⚠️ User ${email} found but has no Store. Creating default store...`);
+            const firstName = user.name?.split(' ')[0] || 'REST';
             const newStore = await prisma.store.create({
                 data: {
-                    name: `${user.name}'s Store`,
+                    name: firstName.substring(0, 4).toUpperCase(),
                     ownerId: user.id,
                     logo: picture
                 }
