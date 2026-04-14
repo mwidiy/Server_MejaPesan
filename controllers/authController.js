@@ -41,7 +41,7 @@ const googleLogin = async (req, res) => {
 
         if (!user) {
             // New User -> Create User + New Store
-            const initials = (name?.split(' ')[0]?.substring(0, 4) || 'REST').toUpperCase();
+            const defaultStoreName = "MEJA";
             user = await prisma.user.create({
                 data: {
                     email,
@@ -50,7 +50,7 @@ const googleLogin = async (req, res) => {
                     role: 'owner', // Default role
                     store: {
                         create: {
-                            name: initials,
+                            name: defaultStoreName,
                             logo: picture
                         }
                     }
@@ -60,11 +60,11 @@ const googleLogin = async (req, res) => {
         } else if (!user.store) {
             // EXISTING USER BUT NO STORE (ZOMBIE USER FIX) 🧟‍♂️ -> 🦸‍♂️
             console.log(`⚠️ User ${email} found but has no Store. Creating default store...`);
-            // Use name from Google Payload for initials
-            const initials = (name?.split(' ')[0]?.substring(0, 4) || 'REST').toUpperCase();
+            // Setting default store name
+            const defaultStoreName = "MEJA";
             const newStore = await prisma.store.create({
                 data: {
-                    name: initials, 
+                    name: defaultStoreName, 
                     ownerId: user.id,
                     logo: picture
                 }
@@ -84,7 +84,7 @@ const googleLogin = async (req, res) => {
             
             if (currentName === googleName) {
                 // It's still using the full Google name -> Force Branding
-                newName = (googleName.split(' ')[0]?.substring(0, 4) || 'REST').toUpperCase();
+                newName = "MEJA";
             } else if (currentName.length > 10) {
                 // Custom but too long -> Soft truncate to 10
                 newName = currentName.substring(0, 10);
