@@ -76,16 +76,22 @@ const googleLogin = async (req, res) => {
             // EXISTING USER WITH STORE -> CHECK FOR DEFAULT CLEANUP
             const currentName = user.store.name;
             const googleName = user.name || "";
-            const isDefaultPattern = currentName.includes("'s Store") || currentName === googleName;
+            
+            // AGGRESSIVE DEFAULT DETECTION: Is it the user's name? Does it end in "Store"? Does it have "'s"?
+            const isDefaultPattern = 
+                currentName === googleName || 
+                currentName.toLowerCase().endsWith("store") || 
+                currentName.includes("'s") ||
+                currentName.includes("'S");
             
             if (isDefaultPattern || currentName.length > 10) {
-                // RESET TO 4-CHAR INITIALS if it looks like a default name, OR TRUNCATE if it's just too long
+                // RESET TO 4-CHAR INITIALS if it looks like a default name, OR HARD-TRUNCATE if it's just long custom
                 const newName = isDefaultPattern 
                     ? (googleName.split(' ')[0]?.substring(0, 4) || 'REST').toUpperCase()
                     : currentName.substring(0, 10);
                 
                 if (newName !== currentName) {
-                    console.log(`🧹 Auto-resetting Store Name for ${email}: "${currentName}" -> "${newName}"`);
+                    console.log(`🧹 Aggressive Auto-fix for ${email}: "${currentName}" -> "${newName}"`);
                     await prisma.store.update({
                         where: { id: user.store.id },
                         data: { name: newName }
