@@ -41,6 +41,7 @@ const googleLogin = async (req, res) => {
 
         if (!user) {
             // New User -> Create User + New Store
+            const initials = (name?.split(' ')[0]?.substring(0, 4) || 'REST').toUpperCase();
             user = await prisma.user.create({
                 data: {
                     email,
@@ -49,7 +50,7 @@ const googleLogin = async (req, res) => {
                     role: 'owner', // Default role
                     store: {
                         create: {
-                            name: (name?.split(' ')[0]?.substring(0, 4) || 'REST').toUpperCase(),
+                            name: initials,
                             logo: picture
                         }
                     }
@@ -59,7 +60,8 @@ const googleLogin = async (req, res) => {
         } else if (!user.store) {
             // EXISTING USER BUT NO STORE (ZOMBIE USER FIX) 🧟‍♂️ -> 🦸‍♂️
             console.log(`⚠️ User ${email} found but has no Store. Creating default store...`);
-            const initials = (user.name?.split(' ')[0]?.substring(0, 4) || 'REST').toUpperCase();
+            // Use name from Google Payload for initials
+            const initials = (name?.split(' ')[0]?.substring(0, 4) || 'REST').toUpperCase();
             const newStore = await prisma.store.create({
                 data: {
                     name: initials, 
@@ -73,31 +75,27 @@ const googleLogin = async (req, res) => {
                 include: { store: true }
             });
         } else {
-            // EXISTING USER WITH STORE -> CHECK FOR DEFAULT CLEANUP
-            const currentName = user.store.name;
-            const googleName = user.name || "";
+            // EXISTING USER WITH STORE -> MODERATE CLEANUP
+            const currentName = user.store.name || "";
+            const googleName = name || ""; // Fresh name from Google payload
             
-            // AGGRESSIVE DEFAULT DETECTION: Is it the user's name? Does it end in "Store"? Does it have "'s"?
-            const isDefaultPattern = 
-                currentName === googleName || 
-                currentName.toLowerCase().endsWith("store") || 
-                currentName.includes("'s") ||
-                currentName.includes("'S");
+            // Logic: Truncate to 10 if too long. If exactly matching Google Name, reset to 4-char branding.
+            let newName = currentName;
             
-            if (isDefaultPattern || currentName.length > 10) {
-                // RESET TO 4-CHAR INITIALS if it looks like a default name, OR HARD-TRUNCATE if it's just long custom
-                const newName = isDefaultPattern 
-                    ? (googleName.split(' ')[0]?.substring(0, 4) || 'REST').toUpperCase()
-                    : currentName.substring(0, 10);
-                
-                if (newName !== currentName) {
-                    console.log(`🧹 Aggressive Auto-fix for ${email}: "${currentName}" -> "${newName}"`);
-                    await prisma.store.update({
-                        where: { id: user.store.id },
-                        data: { name: newName }
-                    });
-                    user.store.name = newName;
-                }
+            if (currentName === googleName) {
+                // It's still using the full Google name -> Force Branding
+                newName = (googleName.split(' ')[0]?.substring(0, 4) || 'REST').toUpperCase();
+            } else if (currentName.length > 10) {
+                // Custom but too long -> Soft truncate to 10
+                newName = currentName.substring(0, 10);
+            }
+            
+            if (newName !== currentName) {
+                await prisma.store.update({
+                    where: { id: user.store.id },
+                    data: { name: newName }
+                });
+                user.store.name = newName;
             }
         }
 
