@@ -70,27 +70,30 @@ const corsOptions = {
     if (!origin || origin === 'null') return callback(null, true);
 
     // 2. Ambil daftar VIP dari .env
-    const allowedOrigins = process.env.FRONTEND_URL 
+    const envOrigins = process.env.FRONTEND_URL 
       ? process.env.FRONTEND_URL.split(',').map(o => o.trim()) 
       : [];
 
-    // 3. Otomatis tambahin localhost dan IP lokal yang ada di .env (Kelonggaran buat local dev)
-    allowedOrigins.push('http://localhost:3000');
-    allowedOrigins.push('http://localhost:3001');
-    allowedOrigins.push('http://localhost:5173'); // Vite default
-    
+    // 3. Masukkan default development & production domain ke array (Safe Defaults)
+    const defaultOrigins = [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:5173',
+      'https://quacxel.my.id',
+      'https://www.quacxel.my.id'
+    ];
+
     if (process.env.LOCAL_DEV_IP) {
-      allowedOrigins.push(`http://${process.env.LOCAL_DEV_IP}:3000`);
-      allowedOrigins.push(`http://${process.env.LOCAL_DEV_IP}:3001`);
-      allowedOrigins.push(`http://${process.env.LOCAL_DEV_IP}:5173`);
+      defaultOrigins.push(`http://${process.env.LOCAL_DEV_IP}:3000`);
+      defaultOrigins.push(`http://${process.env.LOCAL_DEV_IP}:3001`);
+      defaultOrigins.push(`http://${process.env.LOCAL_DEV_IP}:5173`);
     }
 
-    // Origin default produksi
-    allowedOrigins.push('https://quacxel.my.id');
-    allowedOrigins.push('https://www.quacxel.my.id');
+    // Gabungkan VIP dari .env dengan default, hapus duplikat pake Set
+    const finalAllowedOrigins = [...new Set([...envOrigins, ...defaultOrigins])];
 
     // 4. Cek apakah origin ada di daftar yang diizinkan
-    if (allowedOrigins.includes(origin)) {
+    if (finalAllowedOrigins.includes(origin)) {
       return callback(null, true);
     }
 

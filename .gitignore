@@ -1,6 +1,8 @@
 node_modules
 .env
+.env.*
 dist
 .DS_Store
 db_transition_plan.md
 github_transition_plan.md
+.env.staging

@@ -1,5 +1,3 @@
-// prisma/schema.prisma
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,7 +8,6 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// 1. USER (KHUSUS KASIR & OWNER)
 model User {
   id        Int      @id @default(autoincrement())
   email     String   @unique
@@ -23,68 +20,52 @@ model User {
 }
 
 model Store {
-  id              Int      @id @default(autoincrement())
-  name            String   @default("Nama Resto")
-  logo            String? 
-  qrisImage       String? 
-  whatsappNumber  String? // NEW: Dynamic WA Number 
-  isOpen          Boolean  @default(true)
-  
-  ownerId         Int      @unique 
-  owner           User     @relation(fields: [ownerId], references: [id])
-  
-  updatedAt       DateTime @updatedAt
-  
-  // Relations
-  locations       Location[]
-  categories      Category[]
-  products        Product[]
-  banners         Banner[]
-  orders          Order[]
-  arAssets        ArAsset[]
-  withdrawals     Withdrawal[]
-
-  // Bank Details
-  bankName        String?   // Dropdown: BCA, BRI, etc.
-  bankNumber      String?
-  bankHolder      String?
-  
-  // E-Wallet Details
-  ewalletType     String?   // Fixed: "ShopeePay"
-  ewalletNumber   String?
-  ewalletName     String?
-
-  // Feature Flags
-  isKasirQrVerificationEnabled Boolean @default(false)
-  cashPaymentMode              String  @default("post") // "post" = bayar setelah pesan, "pre" = bayar dulu
+  id                           Int          @id @default(autoincrement())
+  name                         String       @default("Nama Resto")
+  logo                         String?
+  qrisImage                    String?
+  whatsappNumber               String?
+  isOpen                       Boolean      @default(true)
+  ownerId                      Int          @unique
+  updatedAt                    DateTime     @updatedAt
+  bankName                     String?
+  bankNumber                   String?
+  bankHolder                   String?
+  ewalletType                  String?
+  ewalletNumber                String?
+  ewalletName                  String?
+  isKasirQrVerificationEnabled Boolean      @default(false)
+  cashPaymentMode              String       @default("post")
+  arAssets                     ArAsset[]
+  banners                      Banner[]
+  categories                   Category[]
+  locations                    Location[]
+  orders                       Order[]
+  products                     Product[]
+  owner                        User         @relation(fields: [ownerId], references: [id])
+  withdrawals                  Withdrawal[]
 }
 
 model Withdrawal {
   id            Int      @id @default(autoincrement())
   amount        Int
-  status        String   @default("Pending") // Pending, Approved, Rejected
-  method        String   // "DANA", "Bank Transfer"
-  
-  // Snapshot details at time of request
+  status        String   @default("Pending")
+  method        String
   bankName      String
   accountNumber String
   accountName   String
-  
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
-  
   storeId       Int
   store         Store    @relation(fields: [storeId], references: [id])
 }
 
-// 2. MEJA & QR MANAGEMENT
 model Location {
-  id        Int      @id @default(autoincrement())
-  name      String
-  tables    Table[]
-  
-  storeId   Int
-  store     Store    @relation(fields: [storeId], references: [id])
+  id      Int     @id @default(autoincrement())
+  name    String
+  storeId Int
+  store   Store   @relation(fields: [storeId], references: [id])
+  tables  Table[]
 }
 
 model Table {
@@ -92,128 +73,99 @@ model Table {
   name       String
   qrCode     String   @unique
   isActive   Boolean  @default(true)
-  orders     Order[]
-
-  // Relasi ke Location
   locationId Int
+  orders     Order[]
   location   Location @relation(fields: [locationId], references: [id])
 }
 
-// 3. MENU MAKANAN
-// 3. KATEGORI MENU (NEW)
 model Category {
-  id        Int       @id @default(autoincrement())
-  name      String
-  products  Product[]
-  
-  storeId   Int
-  store     Store     @relation(fields: [storeId], references: [id])
+  id       Int       @id @default(autoincrement())
+  name     String
+  storeId  Int
+  store    Store     @relation(fields: [storeId], references: [id])
+  products Product[]
 }
 
-// 4. MENU MAKANAN (UPDATED)
 model Product {
   id          Int         @id @default(autoincrement())
   name        String
-  
-  // Relasi ke Category
   categoryId  Int
-  category    Category    @relation(fields: [categoryId], references: [id])
-
   price       Int
   image       String?
   description String?
   isActive    Boolean     @default(true)
-  prepTime    Int         @default(5) // Estimasi waktu masak dalam menit
-  
-  // AR Features
-  ar3dModel   String?     // URL to .glb file
+  prepTime    Int         @default(5)
+  ar3dModel   String?
   isArActive  Boolean     @default(false)
-
-  orderItems  OrderItem[]
-  
   storeId     Int
+  orderItems  OrderItem[]
+  category    Category    @relation(fields: [categoryId], references: [id])
   store       Store       @relation(fields: [storeId], references: [id])
 }
 
-// 4. BANNER PROMOSI
 model Banner {
-  id            Int     @id @default(autoincrement())
+  id            Int      @id @default(autoincrement())
   title         String
   subtitle      String?
   highlightText String?
   image         String
-  isActive      Boolean @default(true)
+  isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
-  
   storeId       Int
   store         Store    @relation(fields: [storeId], references: [id])
 }
 
-// 5. TRANSAKSI (HEADER)
 model Order {
-  id            Int         @id @default(autoincrement())
-  transactionCode String    @unique
-  queueNumber   Int       @default(0) // Daily Queue Number (A-01)
-  expiresAt     DateTime?
-  createdAt     DateTime    @default(now())
-  
-  tableId       Int?
-  table         Table?      @relation(fields: [tableId], references: [id])
-  
-  customerName  String
-  orderType     String
-  paymentMethod String?
-  paymentStatus String      @default("Unpaid")
-  status        String      @default("Pending")
-  totalAmount   Int
-  estimatedTime String?
-  targetTime    DateTime?   // Waktu selesai real-time (untuk Countdown)
-  note          String?
-  deliveryAddress String?
-  
-  items         OrderItem[]
-
-  // Cancellation & Refund
+  id                 Int         @id @default(autoincrement())
+  transactionCode    String      @unique
+  queueNumber        Int         @default(0)
+  expiresAt          DateTime?
+  createdAt          DateTime    @default(now())
+  tableId            Int?
+  customerName       String
+  orderType          String
+  paymentMethod      String?
+  paymentStatus      String      @default("Unpaid")
+  status             String      @default("Pending")
+  totalAmount        Int
+  estimatedTime      String?
+  targetTime         DateTime?
+  note               String?
+  deliveryAddress    String?
   cancellationReason String?
-  cancellationStatus String?   // "Requested", "Approved", "Rejected"
-  refundStatus       String?   // "Pending", "Refunded"
-  
-  storeId       Int
-  store         Store       @relation(fields: [storeId], references: [id])
+  cancellationStatus String?
+  refundStatus       String?
+  storeId            Int
+  store              Store       @relation(fields: [storeId], references: [id])
+  table              Table?      @relation(fields: [tableId], references: [id])
+  items              OrderItem[]
 
-  // Optimization Indexes for High Traffic Querying
   @@index([status, createdAt])
   @@index([transactionCode])
 }
 
-// 6. DETAIL TRANSAKSI (ITEM)
 model OrderItem {
   id            Int     @id @default(autoincrement())
   orderId       Int
-  order         Order   @relation(fields: [orderId], references: [id])
   productId     Int
-  product       Product @relation(fields: [productId], references: [id])
   quantity      Int
   priceSnapshot Int
   note          String?
+  order         Order   @relation(fields: [orderId], references: [id])
+  product       Product @relation(fields: [productId], references: [id])
 }
 
-
-
-// 7. AR ASSETS (CUSTOM UPLOADS)
 model ArAsset {
   id        Int      @id @default(autoincrement())
-  name      String   // Filename
-  url       String   // Full URL
+  name      String
+  url       String
   createdAt DateTime @default(now())
-
   storeId   Int
   store     Store    @relation(fields: [storeId], references: [id])
 }
 
-// 8. GLOBAL CONFIGURATION (SUPER ADMIN)
 model SystemConfig {
-  key       String   @id // contoh: "GLOBAL_PAYMENT_GATEWAY"
-  value     String       // contoh: "midtrans" atau "homemade"
+  key       String   @id
+  value     String
   updatedAt DateTime @updatedAt
 }
