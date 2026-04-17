@@ -49,4 +49,20 @@ const uploadAr = multer({
     fileFilter: filterAr
 });
 
-module.exports = { uploadImage, uploadAr };
+const deleteCloudinaryImage = async (fileUrl) => {
+    if (!fileUrl || !fileUrl.includes('res.cloudinary.com')) return;
+    
+    try {
+        const urlParts = fileUrl.split('/');
+        const filenameWithExt = urlParts.pop();
+        const folder = urlParts.pop();
+        const publicId = `${folder}/${filenameWithExt.split('.')[0]}`;
+        
+        const result = await cloudinary.uploader.destroy(publicId);
+        console.log(`🗑️ Smart Delete: Cloudinary image [${publicId}] erased. Result:`, result.result);
+    } catch (e) {
+        console.error(`⚠️ Failed Smart Delete Cloudinary [${fileUrl}]:`, e.message);
+    }
+};
+
+module.exports = { uploadImage, uploadAr, deleteCloudinaryImage };

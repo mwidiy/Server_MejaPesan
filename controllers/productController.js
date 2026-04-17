@@ -3,11 +3,15 @@ const prisma = new PrismaClient();
 const fs = require('fs');
 const path = require('path');
 const { clearCache } = require('../middleware/cacheMiddleware');
+const { deleteCloudinaryImage } = require('../middleware/upload');
 
-// Helper function untuk menghapus gambar fisik (diabaikan kalau Cloudinary URL)
+// Helper function untuk menghapus gambar fisik (atau Cloudinary)
 const removeImage = (filePath) => {
     if (!filePath) return;
-    if (filePath.includes('res.cloudinary.com')) return; // Cloudinary handled via Dashboard/API separately if needed
+    if (filePath.includes('res.cloudinary.com')) {
+        deleteCloudinaryImage(filePath); // Smart Delete via Cloudinary API
+        return;
+    }
 
     // filePath usually looks like: http://localhost:3000/uploads/image-123.jpg
     // We need to extract the filename: image-123.jpg

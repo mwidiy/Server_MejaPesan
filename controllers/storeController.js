@@ -3,11 +3,16 @@ const prisma = new PrismaClient();
 const fs = require('fs');
 const path = require('path');
 const { clearCache } = require('../middleware/cacheMiddleware');
+const { deleteCloudinaryImage } = require('../middleware/upload');
 
 // Helper to delete old file if needed
 const deleteFile = (filename) => {
     if (!filename) return;
-    // Cek apakah itu URL atau nama file local (Cloudinary URL tak perlu dihapus lokal)
+    // Cek apakah itu URL atau nama file local
+    if (filename.includes('res.cloudinary.com')) {
+        deleteCloudinaryImage(filename);
+        return;
+    }
     if (filename.startsWith('http')) return;
 
     const filePath = path.join(__dirname, '../public/images', filename);
