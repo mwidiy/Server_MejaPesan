@@ -94,35 +94,40 @@ const updateStore = async (req, res) => {
             if (!validModes.includes(cashPaymentMode)) return res.status(400).json({ error: "Cash Payment Mode must be 'pre' or 'post'" });
         }
 
+        // --- SANITIZATION & NORMALIZATION ---
+        const sanitizedData = {
+            name: (name !== undefined && name !== null) ? name : undefined,
+            isOpen: (isOpen === true || isOpen === 'true') ? true : (isOpen === false || isOpen === 'false' ? false : undefined),
+            bankName: (bankName !== undefined && bankName !== null) ? bankName : undefined,
+            bankNumber: (bankNumber !== undefined && bankNumber !== null) ? bankNumber : undefined,
+            bankHolder: (bankHolder !== undefined && bankHolder !== null) ? bankHolder : undefined,
+            ewalletType: (ewalletType !== undefined && ewalletType !== null) ? ewalletType : undefined,
+            ewalletNumber: (ewalletNumber !== undefined && ewalletNumber !== null) ? ewalletNumber : undefined,
+            ewalletName: (ewalletName !== undefined && ewalletName !== null) ? ewalletName : undefined,
+            whatsappNumber: (whatsappNumber !== undefined && whatsappNumber !== null) ? whatsappNumber : undefined,
+            isKasirQrVerificationEnabled: (isKasirQrVerificationEnabled === 'true' || isKasirQrVerificationEnabled === true) ? true : (isKasirQrVerificationEnabled === 'false' || isKasirQrVerificationEnabled === false ? false : undefined),
+            cashPaymentMode: (cashPaymentMode !== undefined && cashPaymentMode !== null) ? cashPaymentMode : undefined,
+            isCashActive: (isCashActive === 'true' || isCashActive === true) ? true : (isCashActive === 'false' || isCashActive === false ? false : undefined)
+        };
+
+        const storeIdInt = parseInt(req.storeId);
+
         // Update Store
         const updated = await prisma.store.update({
-            where: { id: parseInt(req.storeId) },
-            data: {
-                name: name !== null ? name : undefined,
-                isOpen: (isOpen === true || isOpen === 'true') ? true : (isOpen === false || isOpen === 'false' ? false : undefined),
-                bankName: bankName !== null ? bankName : undefined,
-                bankNumber: bankNumber !== null ? bankNumber : undefined,
-                bankHolder: bankHolder !== null ? bankHolder : undefined,
-                ewalletType: ewalletType !== null ? ewalletType : undefined,
-                ewalletNumber: ewalletNumber !== null ? ewalletNumber : undefined,
-                ewalletName: ewalletName !== null ? ewalletName : undefined,
-                whatsappNumber: whatsappNumber !== null ? whatsappNumber : undefined,
-                isKasirQrVerificationEnabled: isKasirQrVerificationEnabled === 'true' || isKasirQrVerificationEnabled === true ? true : (isKasirQrVerificationEnabled === 'false' || isKasirQrVerificationEnabled === false ? false : undefined),
-                cashPaymentMode: cashPaymentMode !== null ? cashPaymentMode : undefined,
-                isCashActive: isCashActive === 'true' || isCashActive === true ? true : (isCashActive === 'false' || isCashActive === false ? false : undefined)
-            }
+            where: { id: storeIdInt },
+            data: sanitizedData
         });
 
         // Cascade Update: If isOpen is changing, update all Tables
-        if (isOpen !== undefined) {
+        if (sanitizedData.isOpen !== undefined) {
             await prisma.table.updateMany({
                 where: {
                     location: {
-                        storeId: req.storeId
+                        storeId: storeIdInt
                     }
                 },
                 data: {
-                    isActive: isOpen
+                    isActive: sanitizedData.isOpen
                 }
             });
         }
