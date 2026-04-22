@@ -96,19 +96,19 @@ const updateStore = async (req, res) => {
 
         // Update Store
         const updated = await prisma.store.update({
-            where: { id: req.storeId },
+            where: { id: parseInt(req.storeId) },
             data: {
-                name,
-                isOpen,
-                bankName,
-                bankNumber,
-                bankHolder,
-                ewalletType,
-                ewalletNumber,
-                ewalletName,
-                whatsappNumber,
+                name: name !== null ? name : undefined,
+                isOpen: (isOpen === true || isOpen === 'true') ? true : (isOpen === false || isOpen === 'false' ? false : undefined),
+                bankName: bankName !== null ? bankName : undefined,
+                bankNumber: bankNumber !== null ? bankNumber : undefined,
+                bankHolder: bankHolder !== null ? bankHolder : undefined,
+                ewalletType: ewalletType !== null ? ewalletType : undefined,
+                ewalletNumber: ewalletNumber !== null ? ewalletNumber : undefined,
+                ewalletName: ewalletName !== null ? ewalletName : undefined,
+                whatsappNumber: whatsappNumber !== null ? whatsappNumber : undefined,
                 isKasirQrVerificationEnabled: isKasirQrVerificationEnabled === 'true' || isKasirQrVerificationEnabled === true ? true : (isKasirQrVerificationEnabled === 'false' || isKasirQrVerificationEnabled === false ? false : undefined),
-                cashPaymentMode: cashPaymentMode || undefined,
+                cashPaymentMode: cashPaymentMode !== null ? cashPaymentMode : undefined,
                 isCashActive: isCashActive === 'true' || isCashActive === true ? true : (isCashActive === 'false' || isCashActive === false ? false : undefined)
             }
         });
