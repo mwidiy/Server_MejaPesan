@@ -14,7 +14,7 @@ const verifyToken = (req, res, next) => {
         req.user = decoded; // { id, email, role, storeId }
 
         // Convenience: Direct access to storeId
-        req.storeId = decoded.storeId;
+        req.storeId = decoded.storeId ? parseInt(decoded.storeId) : null;
 
         next();
     } catch (error) {
@@ -35,14 +35,14 @@ const identifyStore = (req) => {
         try {
             const secret = process.env.JWT_SECRET || 'rahasia_negara_api';
             const decoded = jwt.verify(token, secret);
-            return decoded.storeId;
+            return decoded.storeId ? parseInt(decoded.storeId) : null;
         } catch (e) {
             return null;
         }
     }
 
     // 3. Last Resort: req.storeId (if verifyToken middleware ran)
-    return req.storeId || null;
+    return req.storeId ? parseInt(req.storeId) : null;
 };
 
 module.exports = { verifyToken, identifyStore };
