@@ -27,8 +27,9 @@ const { identifyStore } = require('../middleware/authMiddleware');
 // Ambil data store milik User yang login
 const getStore = async (req, res) => {
     try {
-        const storeId = identifyStore(req);
-        if (!storeId) return res.status(400).json({ error: 'User tidak memiliki akses Toko' });
+        const storeIdRaw = identifyStore(req);
+        const storeId = parseInt(storeIdRaw);
+        if (isNaN(storeId)) return res.status(400).json({ error: 'User tidak memiliki akses Toko' });
 
         const store = await prisma.store.findFirst({
             where: { id: storeId }
@@ -111,6 +112,7 @@ const updateStore = async (req, res) => {
         };
 
         const storeIdInt = parseInt(req.storeId);
+        if (isNaN(storeIdInt)) return res.status(400).json({ error: 'User tidak memiliki akses Toko' });
 
         // Update Store
         const updated = await prisma.store.update({
@@ -145,9 +147,10 @@ const updateStore = async (req, res) => {
 const uploadLogo = async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-        if (!req.storeId) return res.status(400).json({ error: 'User tidak memiliki akses Toko' });
+        const storeId = parseInt(req.storeId);
+        if (isNaN(storeId)) return res.status(400).json({ error: 'User tidak memiliki akses Toko' });
 
-        const store = await prisma.store.findUnique({ where: { id: req.storeId } });
+        const store = await prisma.store.findUnique({ where: { id: storeId } });
         if (!store) return res.status(404).json({ error: 'Store not found' });
 
         // Delete old logo
@@ -156,11 +159,11 @@ const uploadLogo = async (req, res) => {
         const filename = req.file.path; // SECURED: Extract Cloudinary Secure URL
 
         const updated = await prisma.store.update({
-            where: { id: req.storeId },
+            where: { id: storeId },
             data: { logo: filename }
         });
 
-        clearCache('/api/store', req.storeId);
+        clearCache('/api/store', storeId);
 
         res.json({ success: true, data: updated });
     } catch (error) {
@@ -173,9 +176,10 @@ const uploadLogo = async (req, res) => {
 const uploadQris = async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-        if (!req.storeId) return res.status(400).json({ error: 'User tidak memiliki akses Toko' });
+        const storeId = parseInt(req.storeId);
+        if (isNaN(storeId)) return res.status(400).json({ error: 'User tidak memiliki akses Toko' });
 
-        const store = await prisma.store.findUnique({ where: { id: req.storeId } });
+        const store = await prisma.store.findUnique({ where: { id: storeId } });
         if (!store) return res.status(404).json({ error: 'Store not found' });
 
         // Delete old qris
@@ -184,11 +188,11 @@ const uploadQris = async (req, res) => {
         const filename = req.file.path; // SECURED: Extract Cloudinary Secure URL
 
         const updated = await prisma.store.update({
-            where: { id: req.storeId },
+            where: { id: storeId },
             data: { qrisImage: filename }
         });
 
-        clearCache('/api/store', req.storeId);
+        clearCache('/api/store', storeId);
 
         res.json({ success: true, data: updated });
     } catch (error) {
