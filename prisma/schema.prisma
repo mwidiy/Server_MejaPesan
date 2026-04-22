@@ -36,6 +36,7 @@ model Store {
   ewalletName                  String?
   isKasirQrVerificationEnabled Boolean      @default(false)
   cashPaymentMode              String       @default("post")
+  isCashActive                 Boolean      @default(true)
   arAssets                     ArAsset[]
   banners                      Banner[]
   categories                   Category[]
