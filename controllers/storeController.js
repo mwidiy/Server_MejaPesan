@@ -56,41 +56,41 @@ const updateStore = async (req, res) => {
         const numericRegex = /^[0-9]+$/;
         const ewalletTypes = ['Gopay', 'OVO', 'Dana', 'ShopeePay', 'LinkAja'];
 
-        if (name !== undefined) {
+        if (name != null) {
             if (name.length > 10) return res.status(400).json({ error: "Nama Toko terlalu panjang (Maks 10 huruf)" });
             if (!alphanumericSpaceDashRegex.test(name)) return res.status(400).json({ error: "Nama Toko mengandung karakter tidak valid" });
         }
-        if (bankName !== undefined) {
+        if (bankName != null) {
             if (bankName.length > 30) return res.status(400).json({ error: "Bank Name too long (Max 30)" });
             if (bankName.length > 0 && !alphanumericSpaceDashRegex.test(bankName)) return res.status(400).json({ error: "Bank Name contains invalid characters" });
         }
-        if (bankNumber !== undefined) {
+        if (bankNumber != null) {
             if (bankNumber.length > 20) return res.status(400).json({ error: "Bank Number too long (Max 20)" });
             if (bankNumber.length > 0 && !numericRegex.test(bankNumber)) return res.status(400).json({ error: "Bank Number must be numeric" });
         }
-        if (bankHolder !== undefined) {
+        if (bankHolder != null) {
             if (bankHolder.length > 50) return res.status(400).json({ error: "Bank Holder Name too long (Max 50)" });
             if (bankHolder.length > 0 && !alphanumericSpaceDashRegex.test(bankHolder)) return res.status(400).json({ error: "Bank Holder Name contains invalid characters" });
         }
-        if (ewalletType !== undefined && ewalletType.length > 0) {
+        if (ewalletType != null && ewalletType.length > 0) {
             const matchedType = ewalletTypes.find(t => t.toLowerCase() === ewalletType.toLowerCase());
             if (!matchedType) return res.status(400).json({ error: "Invalid E-Wallet Type" });
             // Normalize value for database
             ewalletType = matchedType;
         }
-        if (ewalletNumber !== undefined) {
+        if (ewalletNumber != null) {
             if (ewalletNumber.length > 20) return res.status(400).json({ error: "E-Wallet Number too long (Max 20)" });
             if (ewalletNumber.length > 0 && !numericRegex.test(ewalletNumber)) return res.status(400).json({ error: "E-Wallet Number must be numeric" });
         }
-        if (ewalletName !== undefined) {
+        if (ewalletName != null) {
             if (ewalletName.length > 50) return res.status(400).json({ error: "E-Wallet Name too long (Max 50)" });
             if (ewalletName.length > 0 && !alphanumericSpaceDashRegex.test(ewalletName)) return res.status(400).json({ error: "E-Wallet Name contains invalid characters" });
         }
-        if (whatsappNumber !== undefined) {
+        if (whatsappNumber != null) {
             if (whatsappNumber.length > 20) return res.status(400).json({ error: "WhatsApp Number too long (Max 20)" });
             if (whatsappNumber.length > 0 && !numericRegex.test(whatsappNumber)) return res.status(400).json({ error: "WhatsApp Number must be numeric" });
         }
-        if (cashPaymentMode !== undefined) {
+        if (cashPaymentMode != null) {
             const validModes = ['pre', 'post'];
             if (!validModes.includes(cashPaymentMode)) return res.status(400).json({ error: "Cash Payment Mode must be 'pre' or 'post'" });
         }
