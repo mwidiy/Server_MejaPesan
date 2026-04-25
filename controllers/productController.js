@@ -151,7 +151,7 @@ const createProduct = async (req, res) => {
                 isActive: true,
                 ar3dModel: req.body.ar3dModel || null,
                 isArActive: req.body.isArActive === 'true' || false,
-                store: { connect: { id: req.storeId } } // Connect to Store
+                store: { connect: { id: parseInt(req.storeId) } } // Connect to Store
             },
             include: {
                 category: true
