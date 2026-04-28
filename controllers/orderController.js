@@ -21,7 +21,6 @@ const updateStoreQueueTimeCache = async (storeId) => {
         const utcTodayStart = new Date(todayStart.getTime() - (7 * 60 * 60 * 1000));
 
         // Get all Pending & Processing orders for the store today
-        // Note: position and ahead time are usually based on Pending orders
         const pendingOrders = await prisma.order.findMany({
             where: {
                 storeId: parseInt(storeId),
@@ -32,33 +31,20 @@ const updateStoreQueueTimeCache = async (storeId) => {
             orderBy: { createdAt: 'asc' }
         });
 
-        let cumulativePrepTime = 0;
         const orderMap = {};
 
         pendingOrders.forEach((order, index) => {
-            let orderPrep = 20; // Default
-            if (order.items && order.items.length > 0) {
-                orderPrep = Math.max(...order.items.map(i => i.product?.prepTime || 20));
-            }
-            
-            // For the first person, minutesAhead is 0. 
-            // For the second, minutesAhead is the first person's prepTime, etc.
             orderMap[order.transactionCode] = {
-                position: index + 1,
-                minutesAhead: cumulativePrepTime,
-                myPrepTime: orderPrep
+                position: index + 1
             };
-            
-            cumulativePrepTime += orderPrep;
         });
 
         storeQueueTimeCache.set(`store_${storeId}`, {
-            totalWorkload: cumulativePrepTime,
             orderMap: orderMap,
             lastUpdated: Date.now()
         });
         
-        console.log(`[Queue Cache] Updated for Store ${storeId}. Pending: ${pendingOrders.length}, Workload: ${cumulativePrepTime}m`);
+        console.log(`[Queue Cache] Updated for Store ${storeId}. Total in Queue: ${pendingOrders.length}`);
     } catch (err) {
         console.error(`[Queue Cache] Error updating for Store ${storeId}:`, err.message);
     }
@@ -132,7 +118,7 @@ const createOrder = async (req, res) => {
         if (missingProductIds.length > 0) {
             const dbProducts = await prisma.product.findMany({
                 where: { id: { in: missingProductIds } },
-                select: { id: true, prepTime: true, name: true, price: true }
+                select: { id: true, name: true, price: true }
             });
 
             dbProducts.forEach(p => {
@@ -186,9 +172,6 @@ const createOrder = async (req, res) => {
         let calculatedTotal = 0;
         const orderItemsData = [];
 
-        let maxPrepTime = 0;
-        let isFastLane = true;
-
         for (const item of items) {
             const product = productMap[item.productId];
             if (!product) {
@@ -208,29 +191,11 @@ const createOrder = async (req, res) => {
                 productId: item.productId,
                 quantity: item.quantity,
                 priceSnapshot: realPrice, // Used Server Price
-                // note: item.note
             });
-
-            // Lane Logic
-            const pt = product.prepTime || 5;
-            if (pt > 5) isFastLane = false;
-            if (pt > maxPrepTime) maxPrepTime = pt;
         }
 
         // 5. Generate Transaction Code Unik
         const transactionCode = generateTransactionCode();
-
-        // 3. Set Estimated Time String
-        let finalEstimatedTime = "15-20 Menit";
-        if (isFastLane) {
-            finalEstimatedTime = "5-10 Menit";
-        } else {
-            if (maxPrepTime >= 20) {
-                finalEstimatedTime = "25-30 Menit";
-            } else {
-                finalEstimatedTime = "15-20 Menit";
-            }
-        }
         // --- SMART QUEUE LOGIC END ---
 
 
@@ -303,7 +268,6 @@ const createOrder = async (req, res) => {
                 status: initialStatus,
                 paymentMethod: paymentMethod || null,
                 paymentStatus: paymentStatus || 'Unpaid',
-                estimatedTime: finalEstimatedTime, // Added Smart Estimation
                 items: {
                     create: orderItemsData
                 }
@@ -688,43 +652,21 @@ const getOrderByTransactionCode = async (req, res) => {
         const storeCache = storeQueueTimeCache.get(`store_${order.storeId}`);
         const orderQueueData = storeCache?.orderMap?.[order.transactionCode];
 
-        let totalMinutesAhead = 0;
-        let queuePosition = 1;
-        let myPrep = 20;
-
-        if (order.items && order.items.length > 0) {
-            myPrep = Math.max(...order.items.map(i => i.product?.prepTime || 20));
-        }
-
         if (orderQueueData) {
-            totalMinutesAhead = orderQueueData.minutesAhead;
             queuePosition = orderQueueData.position;
-            console.log(`[Queue Cache] HIT: ${order.transactionCode} (Pos: ${queuePosition}, Ahead: ${totalMinutesAhead}m)`);
+            console.log(`[Queue Cache] HIT: ${order.transactionCode} (Pos: ${queuePosition})`);
         } else {
             // Background update if cache is missing/stale
             if (order.storeId) updateStoreQueueTimeCache(order.storeId);
             console.warn(`[Queue Cache] MISS for ${order.transactionCode} (Store: ${order.storeId}). Cache is likely empty.`);
         }
 
-        // Calculation of Clock Time using the same logic as before (UTC+7)
-        const baseTime = new Date(order.createdAt);
-        const totalWaitTime = totalMinutesAhead + myPrep;
-        const predictedTime = new Date(baseTime.getTime() + totalWaitTime * 60000);
-
-        const wibMillis = predictedTime.getTime() + (7 * 60 * 60 * 1000);
-        const wibDate = new Date(wibMillis);
-
-        const hours = String(wibDate.getUTCHours()).padStart(2, '0');
-        const minutes = String(wibDate.getUTCMinutes()).padStart(2, '0');
-        const clockTime = `${hours}:${minutes}`;
-
         res.status(200).json({
             success: true,
             data: {
                 ...order,
                 queuePosition: queuePosition,
-                ordersAhead: Math.max(0, queuePosition - 1),
-                predictedServiceTime: clockTime
+                ordersAhead: Math.max(0, queuePosition - 1)
             }
         });
     } catch (error) {
