@@ -25,7 +25,7 @@ const updateStoreQueueTimeCache = async (storeId) => {
         const pendingOrders = await prisma.order.findMany({
             where: {
                 storeId: parseInt(storeId),
-                status: 'Pending',
+                status: { in: ['Pending', 'Processing'] },
                 createdAt: { gte: utcTodayStart }
             },
             include: { items: { include: { product: true } } },
