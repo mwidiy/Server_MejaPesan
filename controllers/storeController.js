@@ -54,7 +54,7 @@ const updateStore = async (req, res) => {
         // --- HARDENING: SERVER-SIDE VALIDATION & SANITIZATION ---
         const alphanumericSpaceDashRegex = /^[a-zA-Z0-9 \-\.,']+$/;
         const numericRegex = /^[0-9]+$/;
-        const ewalletTypes = ['Gopay', 'OVO', 'Dana', 'ShopeePay', 'LinkAja'];
+        const ewalletTypes = ['Gopay', 'OVO', 'Dana', 'ShopeePay'];
 
         if (name != null) {
             if (name.length > 10) return res.status(400).json({ error: "Nama Toko terlalu panjang (Maks 10 huruf)" });
