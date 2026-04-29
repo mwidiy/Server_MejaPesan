@@ -3,7 +3,7 @@ const prisma = new PrismaClient();
 const { identifyStore } = require('../middleware/authMiddleware');
 const crypto = require('crypto');
 const SECRET_KEY = process.env.WITHDRAWAL_SECRET_KEY || 'default_secret_key';
-const WEBHOOK_URL = process.env.PAKASIR_WEBHOOK_URL || 'http://localhost:3000';
+const API_PUBLIC_URL = process.env.API_PUBLIC_URL || 'http://localhost:3001';
 
 // Helper: Calculate Balance within Transaction (or normal client if tx not provided)
 const calculateBalance = async (storeId, prismaClient = prisma) => {
@@ -157,8 +157,8 @@ const requestWithdrawal = async (req, res) => {
         const tokenApprove = crypto.createHmac('sha256', SECRET_KEY).update(`${withdrawal.id}approve`).digest('hex');
         const tokenReject = crypto.createHmac('sha256', SECRET_KEY).update(`${withdrawal.id}reject`).digest('hex');
 
-        const linkApprove = `${WEBHOOK_URL}/api/withdraw/process?id=${withdrawal.id}&action=approve&token=${tokenApprove}`;
-        const linkReject = `${WEBHOOK_URL}/api/withdraw/process?id=${withdrawal.id}&action=reject&token=${tokenReject}`;
+        const linkApprove = `${API_PUBLIC_URL}/api/withdraw/process?id=${withdrawal.id}&action=approve&token=${tokenApprove}`;
+        const linkReject = `${API_PUBLIC_URL}/api/withdraw/process?id=${withdrawal.id}&action=reject&token=${tokenReject}`;
 
         const message = `
 <b>🔔 NEW WITHDRAWAL!</b>
