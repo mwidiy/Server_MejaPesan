@@ -95,6 +95,7 @@ model Product {
   image       String?
   description String?
   isActive    Boolean     @default(true)
+  prepTime    Int         @default(5)
   ar3dModel   String?
   isArActive  Boolean     @default(false)
   storeId     Int
@@ -128,6 +129,7 @@ model Order {
   paymentStatus      String      @default("Unpaid")
   status             String      @default("Pending")
   totalAmount        Int
+  targetTime         DateTime?
   note               String?
   deliveryAddress    String?
   cancellationReason String?

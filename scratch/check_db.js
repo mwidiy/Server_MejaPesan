@@ -1,22 +1,18 @@
-
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-async function checkData() {
+async function checkDB() {
     try {
-        const stores = await prisma.store.findMany({
-            include: { owner: true },
-            take: 5
-        });
-        console.log("--- LATEST STORES ---");
-        stores.forEach(s => {
-            console.log(`Store ID: ${s.id}, Name: "${s.name}", Owner: "${s.owner.name}", Email: "${s.owner.email}"`);
-        });
+        const columns = await prisma.$queryRaw`SELECT column_name FROM information_schema.columns WHERE table_name = 'Order'`;
+        console.log('Columns in Order table after sync:', columns);
+        
+        const products = await prisma.$queryRaw`SELECT column_name FROM information_schema.columns WHERE table_name = 'Product'`;
+        console.log('Columns in Product table after sync:', products);
     } catch (e) {
-        console.error(e);
+        console.error('Error:', e.message);
     } finally {
         await prisma.$disconnect();
     }
 }
 
-checkData();
+checkDB();
