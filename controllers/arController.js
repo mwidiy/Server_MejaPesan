@@ -36,8 +36,8 @@ const getArAssets = async (req, res) => {
 
         // DEFAULT ASSETS (Hosted locally)
         const defaultAssets = [
-            { id: 'def1', name: 'defaul1.glb', url: `${baseUrl}/ar-assets/defaul1.glb`, isDefault: true },
-            { id: 'def2', name: 'defaul2.glb', url: `${baseUrl}/ar-assets/defaul2.glb`, isDefault: true }
+            { id: -1, name: 'defaul1.glb', url: `${baseUrl}/ar-assets/defaul1.glb`, isDefault: true },
+            { id: -2, name: 'defaul2.glb', url: `${baseUrl}/ar-assets/defaul2.glb`, isDefault: true }
         ];
 
         res.json({ success: true, data: [...defaultAssets, ...assets] });
