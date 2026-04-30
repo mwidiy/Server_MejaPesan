@@ -34,18 +34,18 @@ const uploadImage = multer({
     limits: { fileSize: 1024 * 1024 * 5 } // 5MB Limit (Prevents DoS)
 });
 
-// --- AR Upload Config (Supabase - Memory Storage) ---
-// File is held in RAM (buffer) as we will stream it directly to Supabase
+// --- AR Upload Config (VPS Local - Memory Storage) ---
+// File is held in RAM (buffer) so we can process/compress it before saving to VPS disk
 const storageAr = multer.memoryStorage();
 
 const filterAr = (req, file, cb) => {
-    // Basic validation, strict validation is in the controller
+    // Basic validation, strict validation is in the arController
     cb(null, true);
 };
 
 const uploadAr = multer({
     storage: storageAr,
-    limits: { fileSize: 1024 * 1024 * 10 }, // 10MB Limit
+    limits: { fileSize: 1024 * 1024 * 20 }, // Increased to 20MB to allow uncompressed uploads
     fileFilter: filterAr
 });
 

@@ -1,12 +1,19 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const { identifyStore } = require('../middleware/authMiddleware');
-const { createClient } = require('@supabase/supabase-js');
+const fs = require('fs');
+const path = require('path');
+const { v4: uuidv4 } = require('uuid');
+const gltfPipeline = require('gltf-pipeline');
+const processGlb = gltfPipeline.processGlb;
 
-// Initialize Supabase Client (Service Role for Admin Access to Storage)
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
+// Configuration for local storage
+const AR_ASSETS_DIR = path.join(__dirname, '../public/ar-assets');
+
+// Ensure directory exists
+if (!fs.existsSync(AR_ASSETS_DIR)) {
+    fs.mkdirSync(AR_ASSETS_DIR, { recursive: true });
+}
 
 // GET /api/ar/assets
 // Ambil aset AR milik Store yang sedang login
@@ -22,14 +29,15 @@ const getArAssets = async (req, res) => {
             orderBy: { createdAt: 'desc' }
         });
 
-        // DEFAULT ASSETS (Public for everyone, hosted on Supabase CDN)
-        // Using `getPublicUrl` guarantees we always use the correct Supabase domain
-        const default1Url = supabase.storage.from('AR').getPublicUrl('defaul1.glb').data.publicUrl;
-        const default2Url = supabase.storage.from('AR').getPublicUrl('defaul2.glb').data.publicUrl;
+        // Use base URL from env or request headers
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+        const host = req.get('host');
+        const baseUrl = `${protocol}://${host}`;
 
+        // DEFAULT ASSETS (Hosted locally)
         const defaultAssets = [
-            { name: 'defaul1.glb', url: default1Url, isDefault: true },
-            { name: 'defaul2.glb', url: default2Url, isDefault: true }
+            { id: 'def1', name: 'defaul1.glb', url: `${baseUrl}/ar-assets/defaul1.glb`, isDefault: true },
+            { id: 'def2', name: 'defaul2.glb', url: `${baseUrl}/ar-assets/defaul2.glb`, isDefault: true }
         ];
 
         res.json({ success: true, data: [...defaultAssets, ...assets] });
@@ -40,7 +48,7 @@ const getArAssets = async (req, res) => {
 };
 
 // POST /api/ar/upload
-// Upload file (.glb format) dan simpan ke Supabase CDN
+// Upload file (.glb format), kompres dengan Draco, dan simpan di VPS Lokal
 const uploadArAsset = async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ success: false, message: "No file uploaded or invalid format" });
@@ -51,41 +59,51 @@ const uploadArAsset = async (req, res) => {
         return res.status(403).json({ success: false, message: "Store Context Missing. Cannot save asset." });
     }
 
-    // STRICT CHECK
+    // STRICT CHECK: Only GLB/GLTF allowed
     const originalName = req.file.originalname;
-    if (!originalName.toLowerCase().endsWith('.glb') && !originalName.toLowerCase().endsWith('.gltf')) {
+    const ext = path.extname(originalName).toLowerCase();
+    if (ext !== '.glb' && ext !== '.gltf') {
         return res.status(400).json({ success: false, message: "Security Block: Only .glb/.gltf files allowed!" });
     }
 
     try {
-        // --- 1. Stream Buffer to Supabase ---
-        // Create unique safe name
-        const safeName = originalName.replace(/[^a-zA-Z0-9.\-_]/g, '_');
-        const uniqueFileName = `${Date.now()}_${storeId}_${safeName}`;
+        console.log(`[AR_UPLOAD] Starting optimization for: ${originalName} (${(req.file.size / 1024).toFixed(2)} KB)`);
 
-        const { data: uploadData, error: uploadError } = await supabase.storage
-            .from('AR')
-            .upload(uniqueFileName, req.file.buffer, {
-                contentType: req.file.mimetype || 'model/gltf-binary', // Fallback to standard GLB MIME Type
-                cacheControl: '3600',
-                upsert: false // Don't overwrite existing
-            });
+        // --- 1. Optimize with Draco Compression ---
+        const options = {
+            dracoOptions: {
+                compressionLevel: 7 // High compression
+            }
+        };
 
-        if (uploadError) {
-            console.error("Supabase Upload Error:", uploadError);
-            return res.status(500).json({ success: false, message: `Upload failed: ${uploadError.message}` });
+        let processedBuffer;
+        try {
+            // processGlb works for both GLB and GLTF buffers
+            const results = await processGlb(req.file.buffer, options);
+            processedBuffer = results.glb;
+            console.log(`[AR_UPLOAD] Optimization Success: New size is ${(processedBuffer.length / 1024).toFixed(2)} KB`);
+        } catch (optimizeError) {
+            console.warn("[AR_UPLOAD] Optimization failed, saving original file instead.", optimizeError.message);
+            processedBuffer = req.file.buffer;
         }
 
-        // --- 2. Retrieve Public URL ---
-        const { data: { publicUrl } } = supabase.storage
-            .from('AR')
-            .getPublicUrl(uniqueFileName);
+        // --- 2. Save to VPS Local Disk ---
+        // Use UUID for security (prevents enumeration)
+        const uniqueFileName = `${uuidv4()}${ext}`;
+        const filePath = path.join(AR_ASSETS_DIR, uniqueFileName);
 
-        // --- 3. Save to Prisma Database ---
+        fs.writeFileSync(filePath, processedBuffer);
+
+        // --- 3. Build Public URL ---
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+        const host = req.get('host');
+        const publicUrl = `${protocol}://${host}/ar-assets/${uniqueFileName}`;
+
+        // --- 4. Save to Prisma Database ---
         const newAsset = await prisma.arAsset.create({
             data: {
-                name: originalName,       // Friendly name for Kasir App display
-                url: publicUrl,           // Supabase CDN URL
+                name: originalName,       // Friendly name display
+                url: publicUrl,           // VPS Local URL
                 storeId: storeId
             }
         });
@@ -93,19 +111,18 @@ const uploadArAsset = async (req, res) => {
         res.status(201).json({ success: true, data: newAsset });
     } catch (error) {
         console.error("Complete Upload Pipeline Error:", error);
-        res.status(500).json({ success: false, message: "Upload pipeline failed" });
+        res.status(500).json({ success: false, message: "Upload pipeline failed", error: error.message });
     }
 };
 
 // DELETE /api/ar/delete/:id
 const deleteArAsset = async (req, res) => {
-    const { id } = req.params; // ID based deletion
+    const { id } = req.params;
     const storeId = identifyStore(req);
 
     if (!storeId) return res.status(403).json({ message: "Store not identified" });
 
     try {
-        // 1. Find Asset (Verify Ownership)
         const asset = await prisma.arAsset.findFirst({
             where: {
                 id: Number(id),
@@ -117,27 +134,24 @@ const deleteArAsset = async (req, res) => {
             return res.status(404).json({ success: false, message: "Asset not found or unauthorized" });
         }
 
-        // 2. Extract Filename from URL (Supabase handles deletions by file path)
-        // URL is like: https://[project].supabase.co/storage/v1/object/public/AR/1700000_1_file.glb
-        // We only need the trailing filename part
-        const filename = asset.url.split('/').pop();
-
-        // 3. Delete from Supabase Storage
-        const { error: removeError } = await supabase.storage
-            .from('AR')
-            .remove([filename]);
-
-        if (removeError) {
-            console.error("Supabase Deletion Warning:", removeError);
-            // We can choose to proceed with DB deletion even if cloud deletion fails
+        // 1. Delete from VPS Disk
+        try {
+            const filename = path.basename(asset.url);
+            const filePath = path.join(AR_ASSETS_DIR, filename);
+            if (fs.existsSync(filePath)) {
+                fs.unlinkSync(filePath);
+                console.log(`[AR_DELETE] Deleted local file: ${filename}`);
+            }
+        } catch (fsError) {
+            console.error("[AR_DELETE] Disk deletion error:", fsError.message);
         }
 
-        // 4. Delete from DB
+        // 2. Delete from DB
         await prisma.arAsset.delete({
             where: { id: asset.id }
         });
 
-        res.json({ success: true, message: "Asset deleted completely" });
+        res.json({ success: true, message: "Asset deleted completely from VPS" });
 
     } catch (error) {
         console.error("Delete Error:", error);
