@@ -194,14 +194,25 @@ const createOrder = async (req, res) => {
             });
         }
 
-        // --- NEW: Calculate Estimated Target Time based on Category Prep Time ---
+        // --- NEW: Calculate Estimated Target Time (QUEUE-AWARE) ---
         let maxPrepTime = 10; // Global Default
         if (products.length > 0) {
             const prepTimes = products.map(p => p.category?.defaultPrepTime || 10);
             maxPrepTime = Math.max(...prepTimes);
         }
         
-        const targetTime = new Date();
+        // 1. Cari antrean terakhir di toko ini yang masih Pending/Processing
+        const latestOrderInQueue = await prisma.order.findFirst({
+            where: {
+                storeId: parseInt(storeId),
+                status: { in: ['Pending', 'Processing'] },
+                targetTime: { gte: new Date() } // Hanya yang estimasinya masih di masa depan
+            },
+            orderBy: { targetTime: 'desc' }, // Ambil yang selesainya paling terakhir
+            select: { targetTime: true }
+        });
+
+        const targetTime = new Date(latestOrderInQueue?.targetTime || new Date());
         targetTime.setMinutes(targetTime.getMinutes() + maxPrepTime);
 
         // 5. Generate Transaction Code Unik
