@@ -51,11 +51,19 @@ const createCategory = async (req, res) => {
     }
 
     try {
+        const sId = Number(storeId);
+        if (isNaN(sId)) {
+            return res.status(400).json({
+                success: false,
+                message: "ID Toko tidak valid"
+            });
+        }
+
         const newCategory = await prisma.category.create({
             data: {
                 name: name,
                 defaultPrepTime: req.body.defaultPrepTime ? parseInt(req.body.defaultPrepTime) : 10,
-                store: { connect: { id: Number(storeId) } }
+                store: { connect: { id: sId } }
             }
         });
 
