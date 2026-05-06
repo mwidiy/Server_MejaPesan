@@ -39,6 +39,9 @@ const getAllCategories = async (req, res) => {
 // Tambah kategori baru
 const createCategory = async (req, res) => {
     const { name } = req.body;
+    const storeId = identifyStore(req);
+
+    if (!storeId) return res.status(400).json({ error: "Store Context Required (storeId)" });
 
     if (!name || name.trim() === "") {
         return res.status(400).json({
@@ -52,12 +55,12 @@ const createCategory = async (req, res) => {
             data: {
                 name: name,
                 defaultPrepTime: req.body.defaultPrepTime ? parseInt(req.body.defaultPrepTime) : 10,
-                store: { connect: { id: req.storeId } }
+                store: { connect: { id: Number(storeId) } }
             }
         });
 
         // Hancurkan cache kategori toko ini
-        clearCache('/api/categories', req.storeId);
+        clearCache('/api/categories', storeId);
 
         res.status(201).json({
             success: true,
@@ -87,10 +90,13 @@ const updateCategory = async (req, res) => {
     const { id } = req.params;
     const { name } = req.body;
 
+    const storeId = identifyStore(req);
+    if (!storeId) return res.status(400).json({ error: "Store Context Required (storeId)" });
+
     try {
         // Check ownership first
         const category = await prisma.category.findFirst({
-            where: { id: Number(id), storeId: req.storeId }
+            where: { id: Number(id), storeId: Number(storeId) }
         });
         if (!category) return res.status(404).json({ success: false, message: "Kategori tidak ditemukan (Store mismatch)" });
 
@@ -103,7 +109,7 @@ const updateCategory = async (req, res) => {
         });
 
         // Hancurkan cache kategori toko ini
-        clearCache('/api/categories', req.storeId);
+        clearCache('/api/categories', storeId);
 
         res.status(200).json({
             success: true,
@@ -129,17 +135,20 @@ const deleteCategory = async (req, res) => {
     const { id } = req.params;
     const categoryId = Number(id);
 
+    const storeId = identifyStore(req);
+    if (!storeId) return res.status(400).json({ error: "Store Context Required (storeId)" });
+
     try {
         const categoryId = Number(id);
 
         const category = await prisma.category.findFirst({
-            where: { id: categoryId, storeId: req.storeId }
+            where: { id: categoryId, storeId: Number(storeId) }
         });
         if (!category) return res.status(404).json({ success: false, message: "Kategori tidak ditemukan (Store mismatch)" });
 
         // Cek dulu apakah kategori ini sedang dipakai oleh produk
         const productCount = await prisma.product.count({
-            where: { categoryId: categoryId, storeId: req.storeId }
+            where: { categoryId: categoryId, storeId: Number(storeId) }
         });
 
         if (productCount > 0) {
@@ -154,7 +163,7 @@ const deleteCategory = async (req, res) => {
         });
 
         // Hancurkan cache kategori toko ini
-        clearCache('/api/categories', req.storeId);
+        clearCache('/api/categories', storeId);
 
         res.status(200).json({
             success: true,
