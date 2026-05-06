@@ -48,7 +48,7 @@ const getStore = async (req, res) => {
 // Update Info
 const updateStore = async (req, res) => {
     try {
-        let { name, isOpen, bankName, bankNumber, bankHolder, ewalletType, ewalletNumber, ewalletName, whatsappNumber, isKasirQrVerificationEnabled, cashPaymentMode, isCashActive } = req.body;
+        let { name, isOpen, bankName, bankNumber, bankHolder, ewalletType, ewalletNumber, ewalletName, whatsappNumber, isKasirQrVerificationEnabled, cashPaymentMode, isCashActive, isDineInActive, isTakeawayActive, isDeliveryActive } = req.body;
         if (!req.storeId) return res.status(400).json({ error: 'User tidak memiliki akses Toko' });
 
         // --- HARDENING: SERVER-SIDE VALIDATION & SANITIZATION ---
@@ -108,7 +108,10 @@ const updateStore = async (req, res) => {
             whatsappNumber: (whatsappNumber !== undefined && whatsappNumber !== null) ? whatsappNumber : undefined,
             isKasirQrVerificationEnabled: (isKasirQrVerificationEnabled === 'true' || isKasirQrVerificationEnabled === true) ? true : (isKasirQrVerificationEnabled === 'false' || isKasirQrVerificationEnabled === false ? false : undefined),
             cashPaymentMode: (cashPaymentMode !== undefined && cashPaymentMode !== null) ? cashPaymentMode : undefined,
-            isCashActive: (isCashActive === 'true' || isCashActive === true) ? true : (isCashActive === 'false' || isCashActive === false ? false : undefined)
+            isCashActive: (isCashActive === 'true' || isCashActive === true) ? true : (isCashActive === 'false' || isCashActive === false ? false : undefined),
+            isDineInActive: (isDineInActive === 'true' || isDineInActive === true) ? true : (isDineInActive === 'false' || isDineInActive === false ? false : undefined),
+            isTakeawayActive: (isTakeawayActive === 'true' || isTakeawayActive === true) ? true : (isTakeawayActive === 'false' || isTakeawayActive === false ? false : undefined),
+            isDeliveryActive: (isDeliveryActive === 'true' || isDeliveryActive === true) ? true : (isDeliveryActive === 'false' || isDeliveryActive === false ? false : undefined)
         };
 
         const storeIdInt = parseInt(req.storeId);

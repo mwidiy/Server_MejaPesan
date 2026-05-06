@@ -51,6 +51,7 @@ const createCategory = async (req, res) => {
         const newCategory = await prisma.category.create({
             data: {
                 name: name,
+                defaultPrepTime: req.body.defaultPrepTime ? parseInt(req.body.defaultPrepTime) : 10,
                 store: { connect: { id: req.storeId } }
             }
         });
@@ -95,7 +96,10 @@ const updateCategory = async (req, res) => {
 
         const updatedCategory = await prisma.category.update({
             where: { id: Number(id) },
-            data: { name: name }
+            data: { 
+                name: name,
+                defaultPrepTime: req.body.defaultPrepTime ? parseInt(req.body.defaultPrepTime) : undefined
+            }
         });
 
         // Hancurkan cache kategori toko ini

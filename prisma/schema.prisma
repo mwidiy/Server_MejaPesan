@@ -37,6 +37,12 @@ model Store {
   isKasirQrVerificationEnabled Boolean      @default(false)
   cashPaymentMode              String       @default("post")
   isCashActive                 Boolean      @default(true)
+  
+  // Fitur Baru: Toggle Metode Pesanan
+  isDineInActive               Boolean      @default(true)
+  isTakeawayActive             Boolean      @default(true)
+  isDeliveryActive             Boolean      @default(false)
+  
   arAssets                     ArAsset[]
   banners                      Banner[]
   categories                   Category[]
@@ -80,11 +86,12 @@ model Table {
 }
 
 model Category {
-  id       Int       @id @default(autoincrement())
-  name     String
-  storeId  Int
-  store    Store     @relation(fields: [storeId], references: [id])
-  products Product[]
+  id              Int       @id @default(autoincrement())
+  name            String
+  defaultPrepTime Int       @default(10) // Fitur Baru: Default waktu masak per kategori (dalam menit)
+  storeId         Int
+  store           Store     @relation(fields: [storeId], references: [id])
+  products        Product[]
 }
 
 model Product {
