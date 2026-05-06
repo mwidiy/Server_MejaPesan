@@ -118,7 +118,7 @@ const createOrder = async (req, res) => {
         if (missingProductIds.length > 0) {
             const dbProducts = await prisma.product.findMany({
                 where: { id: { in: missingProductIds } },
-                select: { id: true, name: true, price: true }
+                select: { id: true, name: true, price: true, category: { select: { defaultPrepTime: true } } }
             });
 
             dbProducts.forEach(p => {
@@ -194,6 +194,16 @@ const createOrder = async (req, res) => {
             });
         }
 
+        // --- NEW: Calculate Estimated Target Time based on Category Prep Time ---
+        let maxPrepTime = 10; // Global Default
+        if (products.length > 0) {
+            const prepTimes = products.map(p => p.category?.defaultPrepTime || 10);
+            maxPrepTime = Math.max(...prepTimes);
+        }
+        
+        const targetTime = new Date();
+        targetTime.setMinutes(targetTime.getMinutes() + maxPrepTime);
+
         // 5. Generate Transaction Code Unik
         const transactionCode = generateTransactionCode();
         // --- SMART QUEUE LOGIC END ---
@@ -268,6 +278,7 @@ const createOrder = async (req, res) => {
                 status: initialStatus,
                 paymentMethod: paymentMethod || null,
                 paymentStatus: paymentStatus || 'Unpaid',
+                targetTime: targetTime, // Set initial estimate
                 items: {
                     create: orderItemsData
                 }
@@ -639,7 +650,7 @@ const getOrderByTransactionCode = async (req, res) => {
                 table: {
                     include: { location: true }
                 },
-                store: { select: { whatsappNumber: true, isKasirQrVerificationEnabled: true, cashPaymentMode: true } }
+                store: { select: { name: true, whatsappNumber: true, isKasirQrVerificationEnabled: true, cashPaymentMode: true, isDineInActive: true, isTakeawayActive: true, isDeliveryActive: true } }
             }
         });
 
