@@ -153,12 +153,16 @@ const initWASession = async (storeId, io) => {
             for (const msg of m.messages) {
                 if (!msg.key.fromMe && msg.message) {
                     const from = msg.key.remoteJid;
-                    const phone = from.split('@')[0];
+                    // TAHAP 38: Robust JID Extraction (Handle suffixes like :1 or @lid)
+                    const fullId = from.split('@')[0];
+                    const phone = fullId.split(':')[0]; // Remove device suffix
+                    const jidType = from.split('@')[1]; // s.whatsapp.net or lid
+                    
                     const pushName = msg.pushName || 'Pelanggan WA';
                     const body = msg.message.conversation || msg.message.extendedTextMessage?.text;
 
                     if (body) {
-                        console.log(`[WA] Message from ${from} (${pushName}) for store ${storeId}: ${body}`);
+                        console.log(`[WA DEBUG] Incoming Message from ${from} (${pushName}). Extracted Phone: ${phone}`);
                         
                         try {
                             // 1. Ensure Virtual Table Exists
@@ -166,7 +170,9 @@ const initWASession = async (storeId, io) => {
                             
                             // 2. Generate Secure Link
                             const pwaUrl = process.env.PWA_URL || 'https://staging.quacxel.my.id';
-                            const sig = signData(`${storeId}:${virtualTable.id}:${phone}`);
+                            // We include jidType in signature if we want to be ultra safe, 
+                            // but for now let's just make sure the phone part is clean.
+                            const sig = signData(`${String(storeId)}:${String(virtualTable.id)}:${String(phone)}`);
                             
                             // 3. Construct URL with Magical Identity parameters
                             // s = storeId, t = tableId, p = phone, n = name, sig = signature
@@ -220,12 +226,21 @@ const sendWAMessage = async (storeId, phone, message) => {
             return false;
         }
 
-        // Format phone: strip any non-digits and append @s.whatsapp.net
-        const cleanPhone = phone.replace(/\D/g, '');
-        const jid = `${cleanPhone}@s.whatsapp.net`;
+        // TAHAP 38: Smart JID Formatting
+        let jid;
+        if (phone.includes('@')) {
+            jid = phone; // Already a full JID
+        } else if (phone.length > 15) {
+            // Likely a LID or Group ID if it's very long and has non-digits
+            jid = `${phone}@lid`;
+        } else {
+            // Standard phone number
+            const cleanPhone = phone.replace(/\D/g, '');
+            jid = `${cleanPhone}@s.whatsapp.net`;
+        }
 
+        console.log(`[WA DEBUG] Sending message to JID: ${jid}`);
         await sock.sendMessage(jid, { text: message });
-        console.log(`[WA] Message sent to ${jid} for store ${storeId}`);
         return true;
     } catch (err) {
         console.error(`[WA] Error sending message for store ${storeId}:`, err.message);
