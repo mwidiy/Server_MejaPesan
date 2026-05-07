@@ -55,7 +55,9 @@ const initWASession = async (storeId, io) => {
             keys: makeCacheableSignalKeyStore(state.keys, logger),
         },
         printQRInTerminal: true,
-        browser: ["MejaPesan Bot", "Chrome", "1.1.0"] // TAHAP 34: Mimic real browser to avoid "Cannot link device" errors
+        browser: ['Mac OS', 'Chrome', '121.0.6167.184'], // TAHAP 34: Use a more specific, modern Chrome version
+        syncFullHistory: false, // Don't sync old chats to avoid detection and save resources
+        markOnlineOnConnect: true
     });
 
     sessions.set(storeId, sock);
