@@ -139,6 +139,8 @@ model Order {
   targetTime         DateTime?
   note               String?
   deliveryAddress    String?
+  customerPhone      String?
+  customerPhoneSig   String?
   cancellationReason String?
   cancellationStatus String?
   refundStatus       String?

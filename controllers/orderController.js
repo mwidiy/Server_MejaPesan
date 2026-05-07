@@ -77,12 +77,28 @@ const createOrder = async (req, res) => {
             note,
             deliveryAddress,
             paymentMethod,
-            paymentStatus
+            paymentStatus,
+            customerPhone,    // NEW
+            customerPhoneSig  // NEW
         } = req.body;
 
         // 1. Validasi Input Dasar
         if (!customerName || !items || items.length === 0) {
             return res.status(400).json({ error: 'Customer name dan items harus diisi.' });
+        }
+
+        // Security: Magical Identity Verification (WhatsApp Bot)
+        let validatedPhone = null;
+        if (customerPhone && customerPhoneSig) {
+            const { verifySignature } = require('../utils/security');
+            const dataToVerify = `${storeId}:${tableId}:${customerPhone}`;
+            if (verifySignature(dataToVerify, customerPhoneSig)) {
+                validatedPhone = customerPhone;
+                console.log(`[Order] Verified Magical Identity for ${customerPhone}`);
+            } else {
+                console.warn(`[Order] FAILED Magical Identity verification for ${customerPhone}. Signature mismatch.`);
+                // We still allow the order but DON'T trust the phone number as a verified bot identity
+            }
         }
 
         // Security: Limit Customer Name Length
@@ -290,6 +306,8 @@ const createOrder = async (req, res) => {
                 paymentMethod: paymentMethod || null,
                 paymentStatus: paymentStatus || 'Unpaid',
                 targetTime: targetTime, // Set initial estimate
+                customerPhone: validatedPhone,
+                customerPhoneSig: customerPhoneSig,
                 items: {
                     create: orderItemsData
                 }

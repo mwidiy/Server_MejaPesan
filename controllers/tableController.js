@@ -37,6 +37,25 @@ exports.getAllTables = async (req, res) => {
     }
 };
 
+// Get table by ID (Public)
+exports.getTableById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const table = await prisma.table.findUnique({
+            where: { id: parseInt(id) },
+            include: { location: true }
+        });
+
+        if (!table) {
+            return res.status(404).json({ message: "Meja tidak ditemukan" });
+        }
+
+        res.status(200).json(table);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
 // Get table by QR Code (Public Scan)
 exports.getTableByQrCode = async (req, res) => {
     try {

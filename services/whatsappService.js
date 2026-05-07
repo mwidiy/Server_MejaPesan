@@ -12,12 +12,46 @@ const { Boom } = require('@hapi/boom');
 const fs = require('fs');
 const path = require('path');
 const rimraf = require('rimraf');
+const crypto = require('crypto');
+const { signData } = require('../utils/security');
 
 const logger = pino({ level: 'info' });
 
-// Global object to store active connections and their last QR
-const sessions = new Map();
-const lastQrCodes = new Map();
+/**
+ * Get or Create a Virtual Table for WhatsApp orders
+ */
+const getOrCreateVirtualTable = async (storeId) => {
+    // 1. Check/Create Location "WhatsApp"
+    let location = await prisma.location.findFirst({
+        where: { storeId: parseInt(storeId), name: 'WhatsApp' }
+    });
+
+    if (!location) {
+        location = await prisma.location.create({
+            data: { storeId: parseInt(storeId), name: 'WhatsApp' }
+        });
+        console.log(`[WA] Created Virtual Location 'WhatsApp' for store ${storeId}`);
+    }
+
+    // 2. Check/Create Table "Order"
+    let table = await prisma.table.findFirst({
+        where: { locationId: location.id, name: 'Order' }
+    });
+
+    if (!table) {
+        table = await prisma.table.create({
+            data: {
+                locationId: location.id,
+                name: 'Order',
+                qrCode: `whatsapp_order_${storeId}_${Date.now()}`,
+                isActive: true
+            }
+        });
+        console.log(`[WA] Created Virtual Table 'Order' in Location 'WhatsApp' for store ${storeId}`);
+    }
+
+    return table;
+};
 
 /**
  * Initialize a WhatsApp session for a specific store
@@ -115,16 +149,31 @@ const initWASession = async (storeId, io) => {
             for (const msg of m.messages) {
                 if (!msg.key.fromMe && msg.message) {
                     const from = msg.key.remoteJid;
+                    const phone = from.split('@')[0];
+                    const pushName = msg.pushName || 'Pelanggan WA';
                     const body = msg.message.conversation || msg.message.extendedTextMessage?.text;
 
                     if (body) {
-                        console.log(`[WA] Message from ${from} for store ${storeId}: ${body}`);
+                        console.log(`[WA] Message from ${from} (${pushName}) for store ${storeId}: ${body}`);
                         
-                        // SIMPLE AUTO-REPLY LOGIC
-                        const pwaUrl = process.env.PWA_URL || 'https://staging.quacxel.my.id';
-                        const replyMessage = `Halo! Terima kasih sudah menghubungi kami. \n\nUntuk memesan makanan, silakan klik link berikut ini ya kak: \n${pwaUrl}/?storeId=${storeId}`;
-                        
-                        await sock.sendMessage(from, { text: replyMessage });
+                        try {
+                            // 1. Ensure Virtual Table Exists
+                            const virtualTable = await getOrCreateVirtualTable(storeId);
+                            
+                            // 2. Generate Secure Link
+                            const pwaUrl = process.env.PWA_URL || 'https://staging.quacxel.my.id';
+                            const sig = signData(`${storeId}:${virtualTable.id}:${phone}`);
+                            
+                            // 3. Construct URL with Magical Identity parameters
+                            // s = storeId, t = tableId, p = phone, n = name, sig = signature
+                            const magicalLink = `${pwaUrl}/?s=${storeId}&t=${virtualTable.id}&p=${phone}&n=${encodeURIComponent(pushName)}&sig=${sig}`;
+                            
+                            const replyMessage = `Halo kak ${pushName}! Terima kasih sudah menghubungi kami. \n\nSilakan klik link di bawah ini untuk melihat menu dan langsung memesan ya kak. Nomor WhatsApp kakak sudah terhubung otomatis: \n\n${magicalLink}`;
+                            
+                            await sock.sendMessage(from, { text: replyMessage });
+                        } catch (err) {
+                            console.error('[WA] Error handling message:', err);
+                        }
                     }
                 }
             }
