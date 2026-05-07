@@ -17,6 +17,10 @@ const { signData } = require('../utils/security');
 
 const logger = pino({ level: 'info' });
 
+// Global object to store active connections and their last QR
+const sessions = new Map();
+const lastQrCodes = new Map();
+
 /**
  * Get or Create a Virtual Table for WhatsApp orders
  */
