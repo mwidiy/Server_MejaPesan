@@ -69,6 +69,7 @@ const initWASession = async (storeId, io) => {
         if (lastQr && io) {
             console.log(`[WA] Re-emitting last QR code for store ${storeId}`);
             io.to(`store_${storeId}`).emit('wa_qr_code', { qr: lastQr });
+            io.to(`store_${storeId}`).emit('whatsapp_qr', { qr: lastQr });
         }
         return;
     }
@@ -109,6 +110,7 @@ const initWASession = async (storeId, io) => {
             // Emit QR to Socket.io for the Admin App (as JSONObject)
             if (io) {
                 io.to(`store_${storeId}`).emit('wa_qr_code', { qr });
+                io.to(`store_${storeId}`).emit('whatsapp_qr', { qr });
             }
         }
 

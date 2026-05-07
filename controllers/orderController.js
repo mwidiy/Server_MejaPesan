@@ -91,13 +91,13 @@ const createOrder = async (req, res) => {
         let validatedPhone = null;
         if (customerPhone && customerPhoneSig) {
             const { verifySignature } = require('../utils/security');
-            const dataToVerify = `${storeId}:${tableId}:${customerPhone}`;
+            // Ensure all params are strings for consistent signature
+            const dataToVerify = `${String(storeId)}:${String(tableId)}:${String(customerPhone)}`;
             if (verifySignature(dataToVerify, customerPhoneSig)) {
                 validatedPhone = customerPhone;
-                console.log(`[Order] Verified Magical Identity for ${customerPhone}`);
+                console.log(`[Order] ✅ Signature MATCH for ${customerPhone}`);
             } else {
-                console.warn(`[Order] FAILED Magical Identity verification for ${customerPhone}. Signature mismatch.`);
-                // We still allow the order but DON'T trust the phone number as a verified bot identity
+                console.warn(`[Order] ❌ Signature MISMATCH for ${customerPhone}. Data: ${dataToVerify}`);
             }
         }
 
@@ -352,13 +352,20 @@ const createOrder = async (req, res) => {
                 }
 
                 // TAHAP 37: Auto-Notification for WhatsApp Orders
+                console.log(`[WA DEBUG] Checking for WA Notification. ValidatedPhone: ${validatedPhone}, isWaitingPayment: ${isWaitingPayment}`);
                 if (validatedPhone) {
-                    const { sendWAMessage } = require('../services/whatsappService');
-                    const estimasiStr = targetTime ? targetTime.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }) : '--:--';
-                    
-                    const waMessage = `✅ *Pesanan Diterima!*\n\nTerima kasih kak *${customerName}*, pesanan kamu sudah masuk ke sistem kami.\n\n🆔 Kode: *${transactionCode}*\n⏳ Estimasi Selesai: *${estimasiStr} WIB*\n\nMohon ditunggu ya kak, kami akan segera mengabari jika pesanan sudah siap! 🍳`;
-                    
-                    await sendWAMessage(storeId, validatedPhone, waMessage);
+                    try {
+                        const { sendWAMessage } = require('../services/whatsappService');
+                        const estimasiStr = targetTime ? targetTime.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }) : '--:--';
+                        
+                        const waMessage = `✅ *Pesanan Diterima!*\n\nTerima kasih kak *${customerName}*, pesanan kamu sudah masuk ke sistem kami.\n\n🆔 Kode: *${transactionCode}*\n⏳ Estimasi Selesai: *${estimasiStr} WIB*\n\nMohon ditunggu ya kak, kami akan segera mengabari jika pesanan sudah siap! 🍳`;
+                        
+                        console.log(`[WA DEBUG] Attempting to send message to ${validatedPhone}...`);
+                        const success = await sendWAMessage(storeId, validatedPhone, waMessage);
+                        console.log(`[WA DEBUG] Result: ${success ? 'SUCCESS' : 'FAILED'}`);
+                    } catch (err) {
+                        console.error('[WA DEBUG] Fatal Error in Notification Block:', err.message);
+                    }
                 }
 
                 console.log(`📡 Emitted 'new_order': ${newOrder.transactionCode} (Store: ${storeId})`);
@@ -606,14 +613,16 @@ const updateOrderStatus = async (req, res) => {
 
                 // TAHAP 37: Auto-Notification for Order Ready/Completed
                 if (updatedOrder.customerPhone && (status === 'Ready' || status === 'Completed')) {
+                    console.log(`[WA DEBUG] Attempting Order Ready notification for ${updatedOrder.customerPhone}`);
                     const { sendWAMessage } = require('../services/whatsappService');
                     const tableName = updatedOrder.table?.name || 'Order';
                     const waMessage = `🍳 *Pesanan Selesai Dibuat!*\n\nHalo kak *${updatedOrder.customerName}*, pesanan kamu di meja *${tableName}* sudah siap nih.\n\nSilakan diambil atau ditunggu pelayan kami mengantarnya ya. Selamat menikmati! 😋`;
                     
                     try {
-                        await sendWAMessage(updatedOrder.storeId, updatedOrder.customerPhone, waMessage);
+                        const success = await sendWAMessage(updatedOrder.storeId, updatedOrder.customerPhone, waMessage);
+                        console.log(`[WA DEBUG] Ready Notification Result: ${success ? 'SUCCESS' : 'FAILED'}`);
                     } catch (waErr) {
-                        console.error('Failed to send WA notification:', waErr);
+                        console.error('[WA DEBUG] Failed to send WA notification:', waErr);
                     }
                 }
 
@@ -626,6 +635,17 @@ const updateOrderStatus = async (req, res) => {
                         req.io.to(`store_${updatedOrder.storeId}`).emit('new_order', updatedOrder);
                     }
                     console.log(`📡 Emitted 'new_order' (Post-Verification): ${updatedOrder.transactionCode}`);
+
+                    // TAHAP 37: Auto-Notification for Payment Success (QRIS/Cash PRE)
+                    if (updatedOrder.customerPhone) {
+                        console.log(`[WA DEBUG] Attempting Payment Success notification for ${updatedOrder.customerPhone}`);
+                        const { sendWAMessage } = require('../services/whatsappService');
+                        const waMessage = `✅ *Pembayaran Berhasil!*\n\nHalo kak *${updatedOrder.customerName}*, pembayaran kamu sudah kami terima.\n\nPesanan *${updatedOrder.transactionCode}* sedang kami proses ya. Mohon ditunggu! 🍳`;
+                        try {
+                            const success = await sendWAMessage(updatedOrder.storeId, updatedOrder.customerPhone, waMessage);
+                            console.log(`[WA DEBUG] Payment Success Result: ${success ? 'SUCCESS' : 'FAILED'}`);
+                        } catch (e) { console.error("[WA DEBUG] WA Notify Error:", e); }
+                    }
                     
                     // TASK 2: BACKGROUND QUEUE CACHE UPDATE when order enters queue
                     updateStoreQueueTimeCache(updatedOrder.storeId);
