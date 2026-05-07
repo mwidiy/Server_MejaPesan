@@ -140,6 +140,7 @@ model Order {
   targetTime         DateTime?
   note               String?
   deliveryAddress    String?
+  cashPaymentMode    String?
   customerPhone      String?
   customerPhoneSig   String?
   customerPhoneJidType String?
