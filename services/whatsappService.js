@@ -54,7 +54,8 @@ const initWASession = async (storeId, io) => {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, logger),
         },
-        printQRInTerminal: true // For dev testing
+        printQRInTerminal: true,
+        browser: ["MejaPesan Bot", "Chrome", "1.1.0"] // TAHAP 34: Mimic real browser to avoid "Cannot link device" errors
     });
 
     sessions.set(storeId, sock);
