@@ -15,6 +15,7 @@ const rateLimit = require('express-rate-limit'); // NEW: Import Rate Limiter
 
 const productRoutes = require('./routes/productRoutes');
 const bannerRoutes = require('./routes/bannerRoutes');
+const whatsappService = require('./services/whatsappService'); // NEW: WA Service
 
 const app = express();
 // NEW: Trust first proxy to allow express-rate-limit to extract real client IP 
@@ -255,6 +256,7 @@ app.use('/api/payment', require('./routes/paymentRoutes')); // Duitku Payment
 app.use('/api/payments', require('./routes/paymentRoutes')); // ALIAS/WEBHOOK FIX: Duitku/Pakasir Webhook with "s" 
 app.use('/api/withdraw', require('./routes/withdrawalRoutes')); // NEW: Withdrawal
 app.use('/api/system-config', require('./routes/systemConfigRoutes')); // NEW: Super Admin Config
+app.use('/api/whatsapp', require('./routes/whatsappRoutes')); // NEW: WA Bot Routes
 
 // --- PRIORITAS 5: GLOBAL ERROR HANDLER (PENUTUP AIB) ---
 // Middleware ini ditaruh PALING BAWAH setelah semua Route.
@@ -284,6 +286,9 @@ app.use((err, req, res, next) => {
 const startServer = () => {
   const runningServer = server.listen(PORT, () => {
     console.log(`✅ Server berjalan di http://localhost:${PORT}`);
+    
+    // NEW: Auto-restart WA Bot sessions when server starts
+    whatsappService.restartAllActiveSessions(io);
   });
 
   runningServer.on('error', (err) => {
