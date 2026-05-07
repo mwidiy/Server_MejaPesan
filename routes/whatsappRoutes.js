@@ -1,44 +1,35 @@
 const express = require('express');
 const router = express.Router();
-const { initWASession, sessions } = require('../services/whatsappService');
+const { initWASession, sessions, disconnectWA, getWAStatus } = require('../services/whatsappService');
 const { verifyToken } = require('../middleware/authMiddleware');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 /**
- * Trigger WhatsApp QR Generation
- * Protected by verifyToken to ensure only the store owner can trigger it
+ * TAHAP 40: Universal WhatsApp Init (Pairing Code Only)
+ * Both /init and /pair now trigger the same Pairing Code logic
  */
-router.post('/init', verifyToken, async (req, res) => {
+const handleInit = async (req, res) => {
     try {
-        const storeId = req.storeId; // Extracted from token by middleware
-        
-        if (!storeId) {
-            return res.status(400).json({ success: false, message: 'Store ID tidak ditemukan dalam token.' });
-        }
+        const storeId = req.storeId;
+        if (!storeId) return res.status(400).json({ success: false, message: 'Store ID tidak ditemukan.' });
 
-        // TAHAP 37: Optimization - Don't re-init if already connected
         const existingSock = sessions.get(parseInt(storeId));
         if (existingSock && existingSock.user) {
-            return res.json({ 
-                success: true, 
-                message: 'WhatsApp sudah terhubung.',
-                status: 'connected'
-            });
+            return res.json({ success: true, message: 'WhatsApp sudah terhubung.', status: 'connected' });
         }
 
-        // Initialize session (this will emit QR via Socket.io)
-        await initWASession(storeId, req.io);
-
-        res.json({ 
-            success: true, 
-            message: 'Inisialisasi WhatsApp dimulai. Silakan cek Socket.io untuk QR Code.' 
-        });
+        // initWASession now automatically fetches number and requests pairing code
+        await initWASession(storeId, req.app.get('io'));
+        res.json({ success: true, message: 'Proses pairing dimulai. Silakan cek kode di aplikasi.' });
     } catch (err) {
-        console.error('[WA Route] Error init:', err);
+        console.error('[WA Route] Error:', err);
         res.status(500).json({ success: false, message: err.message });
     }
-});
+};
+
+router.post('/init', verifyToken, handleInit);
+router.post('/pair', verifyToken, handleInit);
 
 /**
  * Get current WhatsApp status
@@ -46,9 +37,7 @@ router.post('/init', verifyToken, async (req, res) => {
 router.get('/status', verifyToken, async (req, res) => {
     try {
         const storeId = req.storeId;
-        const sock = sessions.get(parseInt(storeId));
-        // TAHAP 36: More accurate status check (check if authenticated)
-        const isConnected = sock && sock.user ? 'connected' : 'disconnected';
+        const status = getWAStatus(storeId);
         
         const store = await prisma.store.findUnique({
             where: { id: parseInt(storeId) },
@@ -57,7 +46,7 @@ router.get('/status', verifyToken, async (req, res) => {
 
         res.json({
             success: true,
-            status: isConnected,
+            status: status,
             isDbActive: store?.isWaBotActive || false
         });
     } catch (err) {
@@ -66,24 +55,19 @@ router.get('/status', verifyToken, async (req, res) => {
 });
 
 /**
- * Disconnect/Logout WhatsApp
+ * Manual disconnect
  */
 router.post('/disconnect', verifyToken, async (req, res) => {
     try {
         const storeId = req.storeId;
-        const sock = sessions.get(storeId);
-        
-        if (sock) {
-            await sock.logout();
-            sessions.delete(storeId);
+        const success = await disconnectWA(parseInt(storeId));
+        if (success) {
+            const io = req.app.get('io');
+            if (io) io.to(`store_${storeId}`).emit('wa_status', { status: 'disconnected' });
+            res.json({ success: true, message: 'WhatsApp berhasil diputuskan.' });
+        } else {
+            res.status(400).json({ success: false, message: 'Gagal memutuskan atau tidak ada sesi aktif.' });
         }
-
-        await prisma.store.update({
-            where: { id: parseInt(storeId) },
-            data: { isWaBotActive: false }
-        });
-
-        res.json({ success: true, message: 'WhatsApp berhasil diputuskan.' });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }

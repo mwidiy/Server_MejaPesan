@@ -17,9 +17,8 @@ const { signData } = require('../utils/security');
 
 const logger = pino({ level: 'info' });
 
-// Global object to store active connections and their last QR
+// Global object to store active connections
 const sessions = new Map();
-const lastQrCodes = new Map();
 
 /**
  * Get or Create a Virtual Table for WhatsApp orders
@@ -58,25 +57,33 @@ const getOrCreateVirtualTable = async (storeId) => {
 };
 
 /**
- * Initialize a WhatsApp session for a specific store
+ * Initialize a WhatsApp session for a specific store (Pairing Code Only)
  */
 const initWASession = async (storeId, io) => {
-    // TAHAP 37: Prevent duplicate initialization
+    // TAHAP 40: Fetch phone number from DB if not provided
+    const store = await prisma.store.findUnique({
+        where: { id: parseInt(storeId) },
+        select: { whatsappNumber: true }
+    });
+
+    if (!store || !store.whatsappNumber) {
+        console.error(`[WA] Cannot init session: whatsappNumber is missing for store ${storeId}`);
+        if (io) io.to(`store_${storeId}`).emit('wa_error', { message: 'Nomor WhatsApp belum diatur.' });
+        return null;
+    }
+
+    const phoneNumber = store.whatsappNumber.replace(/\D/g, '');
+
+    // Prevent duplicate initialization
     const existingSock = sessions.get(storeId);
     if (existingSock) {
-        console.log(`[WA] Session for store ${storeId} already exists. Re-emitting last QR if available.`);
-        const lastQr = lastQrCodes.get(storeId);
-        if (lastQr && io) {
-            console.log(`[WA] Re-emitting last QR code for store ${storeId}`);
-            io.to(`store_${storeId}`).emit('wa_qr_code', { qr: lastQr });
-            io.to(`store_${storeId}`).emit('whatsapp_qr', { qr: lastQr });
+        if (existingSock.user) {
+            if (io) io.to(`store_${storeId}`).emit('wa_status', { status: 'connected' });
+            return existingSock;
         }
-        return;
     }
 
     const sessionDir = path.join(__dirname, '../sessions', `store_${storeId}`);
-    
-    // Ensure sessions directory exists
     if (!fs.existsSync(path.join(__dirname, '../sessions'))) {
         fs.mkdirSync(path.join(__dirname, '../sessions'));
     }
@@ -91,45 +98,45 @@ const initWASession = async (storeId, io) => {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, logger),
         },
-        printQRInTerminal: true,
-        browser: ['Mac OS', 'Chrome', '121.0.6167.184'], // TAHAP 34: Use a more specific, modern Chrome version
-        syncFullHistory: false, // Don't sync old chats to avoid detection and save resources
+        printQRInTerminal: false, // QR is now disabled
+        browser: ['MejaPesan Bot', 'Chrome', '121.0.6167.184'], 
+        syncFullHistory: false, 
         markOnlineOnConnect: true
     });
 
     sessions.set(storeId, sock);
 
+    // TAHAP 40: Always Request Pairing Code if not registered
+    if (!sock.authState.creds.registered) {
+        console.log(`[WA] Requesting Pairing Code for ${phoneNumber}...`);
+        setTimeout(async () => {
+            try {
+                const code = await sock.requestPairingCode(phoneNumber);
+                console.log(`[WA] Pairing Code for store ${storeId}: ${code}`);
+                if (io) io.to(`store_${storeId}`).emit('wa_pairing_code', { code });
+            } catch (err) {
+                console.error('[WA] Failed to request pairing code:', err);
+                if (io) io.to(`store_${storeId}`).emit('wa_error', { message: 'Gagal meminta kode pairing.' });
+            }
+        }, 3000);
+    }
+
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
-
-        if (qr) {
-            console.log(`[WA] New QR Code generated for store ${storeId}`);
-            lastQrCodes.set(storeId, qr); // Cache the QR
-            // Emit QR to Socket.io for the Admin App (as JSONObject)
-            if (io) {
-                io.to(`store_${storeId}`).emit('wa_qr_code', { qr });
-                io.to(`store_${storeId}`).emit('whatsapp_qr', { qr });
-            }
-        }
+        const { connection, lastDisconnect } = update;
 
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect.error instanceof Boom) 
                 ? lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut 
                 : true;
             
-            console.log(`[WA] Connection closed for store ${storeId}. Reason:`, lastDisconnect.error, 'Reconnect:', shouldReconnect);
-            
             sessions.delete(storeId);
-            lastQrCodes.delete(storeId); // Clear QR on close
-
             if (shouldReconnect) {
                 initWASession(storeId, io);
             } else {
                 console.log(`[WA] Logged out from store ${storeId}. Cleaning up...`);
-                rimraf.sync(sessionDir);
-                // Update DB state
+                if (fs.existsSync(sessionDir)) rimraf.sync(sessionDir);
                 await prisma.store.update({
                     where: { id: parseInt(storeId) },
                     data: { isWaBotActive: false }
@@ -138,7 +145,6 @@ const initWASession = async (storeId, io) => {
             }
         } else if (connection === 'open') {
             console.log(`[WA] Connection opened successfully for store ${storeId}`);
-            lastQrCodes.delete(storeId); // Clear QR on success
             await prisma.store.update({
                 where: { id: parseInt(storeId) },
                 data: { isWaBotActive: true }
@@ -249,9 +255,50 @@ const sendWAMessage = async (storeId, phone, message) => {
     }
 };
 
+const disconnectWA = async (storeId) => {
+    try {
+        const sock = sessions.get(storeId);
+        const sessionDir = path.join(__dirname, '../sessions', `store_${storeId}`);
+
+        if (sock) {
+            // TAHAP 40: Proper Logout
+            try {
+                await sock.logout();
+            } catch (err) {
+                console.warn(`[WA] Socket logout warning for store ${storeId}:`, err.message);
+            }
+            sock.end();
+            sessions.delete(storeId);
+        }
+
+        // Always clean up directory to be sure
+        if (fs.existsSync(sessionDir)) {
+            rimraf.sync(sessionDir);
+        }
+
+        await prisma.store.update({
+            where: { id: parseInt(storeId) },
+            data: { isWaBotActive: false }
+        });
+
+        console.log(`[WA] Store ${storeId} disconnected and session cleared.`);
+        return true;
+    } catch (err) {
+        console.error(`[WA] Disconnect error for store ${storeId}:`, err);
+        return false;
+    }
+};
+
+const getWAStatus = (storeId) => {
+    const sock = sessions.get(parseInt(storeId));
+    return sock && sock.user ? 'connected' : 'disconnected';
+};
+
 module.exports = {
     initWASession,
     restartAllActiveSessions,
     sendWAMessage,
+    disconnectWA,
+    getWAStatus,
     sessions
 };

@@ -179,6 +179,7 @@ app.use(express.static('public'));
 app.use('/uploads', express.static('public/images'));
 
 // Middleware agar io bisa dipakai di controller
+app.set('io', io); // TAHAP 40: Set global io for app.get('io')
 app.use((req, res, next) => {
   req.io = io;
   next();
