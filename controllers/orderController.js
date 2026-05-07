@@ -79,7 +79,9 @@ const createOrder = async (req, res) => {
             paymentMethod,
             paymentStatus,
             customerPhone,    // NEW
-            customerPhoneSig  // NEW
+            customerPhone,
+            customerPhoneSig,
+            customerPhoneJidType
         } = req.body;
 
         // 1. Validasi Input Dasar
@@ -91,11 +93,11 @@ const createOrder = async (req, res) => {
         let validatedPhone = null;
         if (customerPhone && customerPhoneSig) {
             const { verifySignature } = require('../utils/security');
-            // Ensure all params are strings for consistent signature
-            const dataToVerify = `${String(storeId)}:${String(tableId)}:${String(customerPhone)}`;
+            // TAHAP 39: Include jidType in verification to match bot signature
+            const dataToVerify = `${String(storeId)}:${String(tableId)}:${String(customerPhone)}:${String(customerPhoneJidType || 's.whatsapp.net')}`;
             if (verifySignature(dataToVerify, customerPhoneSig)) {
                 validatedPhone = customerPhone;
-                console.log(`[Order] ✅ Signature MATCH for ${customerPhone}`);
+                console.log(`[Order] ✅ Signature MATCH for ${customerPhone} (Type: ${customerPhoneJidType || 's.whatsapp.net'})`);
             } else {
                 console.warn(`[Order] ❌ Signature MISMATCH for ${customerPhone}. Data: ${dataToVerify}`);
             }
@@ -305,9 +307,11 @@ const createOrder = async (req, res) => {
                 status: initialStatus,
                 paymentMethod: paymentMethod || null,
                 paymentStatus: paymentStatus || 'Unpaid',
-                targetTime: targetTime, // Set initial estimate
+                targetTime: targetTime, // Restore missing targetTime
+                cashPaymentMode: paymentMethod === 'cash' ? (storeData?.cashPaymentMode || 'post') : null,
                 customerPhone: validatedPhone,
-                customerPhoneSig: customerPhoneSig,
+                customerPhoneSig: validatedPhone ? customerPhoneSig : null,
+                customerPhoneJidType: validatedPhone ? (customerPhoneJidType || 's.whatsapp.net') : null,
                 items: {
                     create: orderItemsData
                 }
@@ -360,8 +364,9 @@ const createOrder = async (req, res) => {
                         
                         const waMessage = `✅ *Pesanan Diterima!*\n\nTerima kasih kak *${customerName}*, pesanan kamu sudah masuk ke sistem kami.\n\n🆔 Kode: *${transactionCode}*\n⏳ Estimasi Selesai: *${estimasiStr} WIB*\n\nMohon ditunggu ya kak, kami akan segera mengabari jika pesanan sudah siap! 🍳`;
                         
-                        console.log(`[WA DEBUG] Attempting to send message to ${validatedPhone}...`);
-                        const success = await sendWAMessage(storeId, validatedPhone, waMessage);
+                        console.log(`[WA DEBUG] Attempting to send message to ${validatedPhone} (Type: ${customerPhoneJidType})...`);
+                        const fullJid = `${validatedPhone}@${customerPhoneJidType || 's.whatsapp.net'}`;
+                        const success = await sendWAMessage(storeId, fullJid, waMessage);
                         console.log(`[WA DEBUG] Result: ${success ? 'SUCCESS' : 'FAILED'}`);
                     } catch (err) {
                         console.error('[WA DEBUG] Fatal Error in Notification Block:', err.message);
@@ -613,13 +618,14 @@ const updateOrderStatus = async (req, res) => {
 
                 // TAHAP 37: Auto-Notification for Order Ready/Completed
                 if (updatedOrder.customerPhone && (status === 'Ready' || status === 'Completed')) {
-                    console.log(`[WA DEBUG] Attempting Order Ready notification for ${updatedOrder.customerPhone}`);
+                    console.log(`[WA DEBUG] Attempting Order Ready notification for ${updatedOrder.customerPhone} (Type: ${updatedOrder.customerPhoneJidType})`);
                     const { sendWAMessage } = require('../services/whatsappService');
                     const tableName = updatedOrder.table?.name || 'Order';
                     const waMessage = `🍳 *Pesanan Selesai Dibuat!*\n\nHalo kak *${updatedOrder.customerName}*, pesanan kamu di meja *${tableName}* sudah siap nih.\n\nSilakan diambil atau ditunggu pelayan kami mengantarnya ya. Selamat menikmati! 😋`;
                     
                     try {
-                        const success = await sendWAMessage(updatedOrder.storeId, updatedOrder.customerPhone, waMessage);
+                        const fullJid = `${updatedOrder.customerPhone}@${updatedOrder.customerPhoneJidType || 's.whatsapp.net'}`;
+                        const success = await sendWAMessage(updatedOrder.storeId, fullJid, waMessage);
                         console.log(`[WA DEBUG] Ready Notification Result: ${success ? 'SUCCESS' : 'FAILED'}`);
                     } catch (waErr) {
                         console.error('[WA DEBUG] Failed to send WA notification:', waErr);
@@ -638,11 +644,12 @@ const updateOrderStatus = async (req, res) => {
 
                     // TAHAP 37: Auto-Notification for Payment Success (QRIS/Cash PRE)
                     if (updatedOrder.customerPhone) {
-                        console.log(`[WA DEBUG] Attempting Payment Success notification for ${updatedOrder.customerPhone}`);
+                        console.log(`[WA DEBUG] Attempting Payment Success notification for ${updatedOrder.customerPhone} (Type: ${updatedOrder.customerPhoneJidType})`);
                         const { sendWAMessage } = require('../services/whatsappService');
                         const waMessage = `✅ *Pembayaran Berhasil!*\n\nHalo kak *${updatedOrder.customerName}*, pembayaran kamu sudah kami terima.\n\nPesanan *${updatedOrder.transactionCode}* sedang kami proses ya. Mohon ditunggu! 🍳`;
                         try {
-                            const success = await sendWAMessage(updatedOrder.storeId, updatedOrder.customerPhone, waMessage);
+                            const fullJid = `${updatedOrder.customerPhone}@${updatedOrder.customerPhoneJidType || 's.whatsapp.net'}`;
+                            const success = await sendWAMessage(updatedOrder.storeId, fullJid, waMessage);
                             console.log(`[WA DEBUG] Payment Success Result: ${success ? 'SUCCESS' : 'FAILED'}`);
                         } catch (e) { console.error("[WA DEBUG] WA Notify Error:", e); }
                     }

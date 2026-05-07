@@ -170,19 +170,20 @@ const initWASession = async (storeId, io) => {
                             
                             // 2. Generate Secure Link
                             const pwaUrl = process.env.PWA_URL || 'https://staging.quacxel.my.id';
-                            // We include jidType in signature if we want to be ultra safe, 
-                            // but for now let's just make sure the phone part is clean.
-                            const sig = signData(`${String(storeId)}:${String(virtualTable.id)}:${String(phone)}`);
+                            // TAHAP 39: Include JID Type (jt) in signature for full identity security
+                            const sig = signData(`${String(storeId)}:${String(virtualTable.id)}:${String(phone)}:${String(jidType)}`);
                             
                             // 3. Construct URL with Magical Identity parameters
-                            // s = storeId, t = tableId, p = phone, n = name, sig = signature
-                            const magicalLink = `${pwaUrl}/?s=${storeId}&t=${virtualTable.id}&p=${phone}&n=${encodeURIComponent(pushName)}&sig=${sig}`;
+                            // jt = jidType (lid or s.whatsapp.net)
+                            const magicalLink = `${pwaUrl}/?s=${storeId}&t=${virtualTable.id}&p=${phone}&jt=${jidType}&n=${encodeURIComponent(pushName)}&sig=${sig}`;
                             
-                            const replyMessage = `Halo kak ${pushName}! Terima kasih sudah menghubungi kami. \n\nSilakan klik link di bawah ini untuk melihat menu dan langsung memesan ya kak. Nomor WhatsApp kakak sudah terhubung otomatis: \n\n${magicalLink}`;
+                            const welcomeMsg = `Halo kak *${pushName}*! Terima kasih sudah menghubungi kami. \n\nSilakan klik link di bawah ini untuk melihat menu dan langsung memesan ya kak. Nomor WhatsApp kakak sudah terhubung otomatis: \n\n${magicalLink}`;
                             
-                            await sock.sendMessage(from, { text: replyMessage });
+                            // TAHAP 39: Disable link preview to avoid missing dependency errors (link-preview-js)
+                            await sock.sendMessage(from, { text: welcomeMsg }, { linkPreview: null });
+                            console.log(`[WA DEBUG] Sent Magical Link to ${from} (Type: ${jidType})`);
                         } catch (err) {
-                            console.error('[WA] Error handling message:', err);
+                            console.error('[WA DEBUG] Error sending welcome message:', err);
                         }
                     }
                 }

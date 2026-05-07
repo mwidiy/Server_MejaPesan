@@ -142,6 +142,7 @@ model Order {
   deliveryAddress    String?
   customerPhone      String?
   customerPhoneSig   String?
+  customerPhoneJidType String?
   cancellationReason String?
   cancellationStatus String?
   refundStatus       String?
