@@ -350,6 +350,17 @@ const createOrder = async (req, res) => {
                 if (storeId) {
                     req.io.to(`store_${storeId}`).emit('new_order', newOrder);
                 }
+
+                // TAHAP 37: Auto-Notification for WhatsApp Orders
+                if (validatedPhone) {
+                    const { sendWAMessage } = require('../services/whatsappService');
+                    const estimasiStr = targetTime ? targetTime.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }) : '--:--';
+                    
+                    const waMessage = `✅ *Pesanan Diterima!*\n\nTerima kasih kak *${customerName}*, pesanan kamu sudah masuk ke sistem kami.\n\n🆔 Kode: *${transactionCode}*\n⏳ Estimasi Selesai: *${estimasiStr} WIB*\n\nMohon ditunggu ya kak, kami akan segera mengabari jika pesanan sudah siap! 🍳`;
+                    
+                    await sendWAMessage(storeId, validatedPhone, waMessage);
+                }
+
                 console.log(`📡 Emitted 'new_order': ${newOrder.transactionCode} (Store: ${storeId})`);
 
                 // --- FCM PUSH NOTIFICATION ---
@@ -587,11 +598,25 @@ const updateOrderStatus = async (req, res) => {
 
         // Emit socket event (Asynchronous Offloading)
         if (req.io) {
-            setTimeout(() => {
-                req.io.emit('order_status_updated', updatedOrder);
+            setTimeout(async () => {
+                // Emit specifically to the store room
                 if (updatedOrder.storeId) {
                     req.io.to(`store_${updatedOrder.storeId}`).emit('order_status_updated', updatedOrder);
                 }
+
+                // TAHAP 37: Auto-Notification for Order Ready/Completed
+                if (updatedOrder.customerPhone && (status === 'Ready' || status === 'Completed')) {
+                    const { sendWAMessage } = require('../services/whatsappService');
+                    const tableName = updatedOrder.table?.name || 'Order';
+                    const waMessage = `🍳 *Pesanan Selesai Dibuat!*\n\nHalo kak *${updatedOrder.customerName}*, pesanan kamu di meja *${tableName}* sudah siap nih.\n\nSilakan diambil atau ditunggu pelayan kami mengantarnya ya. Selamat menikmati! 😋`;
+                    
+                    try {
+                        await sendWAMessage(updatedOrder.storeId, updatedOrder.customerPhone, waMessage);
+                    } catch (waErr) {
+                        console.error('Failed to send WA notification:', waErr);
+                    }
+                }
+
                 console.log(`📡 Emitted 'order_status_updated': ${updatedOrder.transactionCode} -> ${dataToUpdate.status || status} (Store: ${updatedOrder.storeId})`);
 
                 // Also emit 'new_order' if we just transitioned out of WaitingPayment

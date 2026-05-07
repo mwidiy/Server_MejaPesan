@@ -61,12 +61,10 @@ const getOrCreateVirtualTable = async (storeId) => {
  * Initialize a WhatsApp session for a specific store
  */
 const initWASession = async (storeId, io) => {
-    console.log(`[WA] Initializing session for store ${storeId}...`);
-    
-    if (sessions.has(storeId)) {
-        console.log(`[WA] Session already active for store ${storeId}.`);
-        
-        // If we have a pending QR, re-emit it to the new socket connection
+    // TAHAP 37: Prevent duplicate initialization
+    const existingSock = sessions.get(storeId);
+    if (existingSock) {
+        console.log(`[WA] Session for store ${storeId} already exists. Re-emitting last QR if available.`);
         const lastQr = lastQrCodes.get(storeId);
         if (lastQr && io) {
             console.log(`[WA] Re-emitting last QR code for store ${storeId}`);
@@ -206,8 +204,36 @@ const restartAllActiveSessions = async (io) => {
     }
 };
 
+/**
+ * Send a WhatsApp message for a specific store
+ * @param {number|string} storeId 
+ * @param {string} phone - Recipient phone number (e.g. 62812...)
+ * @param {string} message - Message text
+ */
+const sendWAMessage = async (storeId, phone, message) => {
+    try {
+        const sock = sessions.get(parseInt(storeId));
+        if (!sock) {
+            console.warn(`[WA] Cannot send message: No active session for store ${storeId}`);
+            return false;
+        }
+
+        // Format phone: strip any non-digits and append @s.whatsapp.net
+        const cleanPhone = phone.replace(/\D/g, '');
+        const jid = `${cleanPhone}@s.whatsapp.net`;
+
+        await sock.sendMessage(jid, { text: message });
+        console.log(`[WA] Message sent to ${jid} for store ${storeId}`);
+        return true;
+    } catch (err) {
+        console.error(`[WA] Error sending message for store ${storeId}:`, err.message);
+        return false;
+    }
+};
+
 module.exports = {
     initWASession,
     restartAllActiveSessions,
+    sendWAMessage,
     sessions
 };

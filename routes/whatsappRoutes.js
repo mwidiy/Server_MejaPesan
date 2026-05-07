@@ -17,6 +17,16 @@ router.post('/init', verifyToken, async (req, res) => {
             return res.status(400).json({ success: false, message: 'Store ID tidak ditemukan dalam token.' });
         }
 
+        // TAHAP 37: Optimization - Don't re-init if already connected
+        const existingSock = sessions.get(parseInt(storeId));
+        if (existingSock && existingSock.user) {
+            return res.json({ 
+                success: true, 
+                message: 'WhatsApp sudah terhubung.',
+                status: 'connected'
+            });
+        }
+
         // Initialize session (this will emit QR via Socket.io)
         await initWASession(storeId, req.io);
 
@@ -36,7 +46,9 @@ router.post('/init', verifyToken, async (req, res) => {
 router.get('/status', verifyToken, async (req, res) => {
     try {
         const storeId = req.storeId;
-        const sock = sessions.get(storeId);
+        const sock = sessions.get(parseInt(storeId));
+        // TAHAP 36: More accurate status check (check if authenticated)
+        const isConnected = sock && sock.user ? 'connected' : 'disconnected';
         
         const store = await prisma.store.findUnique({
             where: { id: parseInt(storeId) },
@@ -45,7 +57,7 @@ router.get('/status', verifyToken, async (req, res) => {
 
         res.json({
             success: true,
-            status: sock ? 'connected' : 'disconnected',
+            status: isConnected,
             isDbActive: store?.isWaBotActive || false
         });
     } catch (err) {
