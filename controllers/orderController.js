@@ -78,7 +78,6 @@ const createOrder = async (req, res) => {
             deliveryAddress,
             paymentMethod,
             paymentStatus,
-            customerPhone,    // NEW
             customerPhone,
             customerPhoneSig,
             customerPhoneJidType
