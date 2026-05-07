@@ -15,8 +15,9 @@ const rimraf = require('rimraf');
 
 const logger = pino({ level: 'info' });
 
-// Global object to store active connections
+// Global object to store active connections and their last QR
 const sessions = new Map();
+const lastQrCodes = new Map();
 
 /**
  * Initialize a WhatsApp session for a specific store
@@ -25,7 +26,14 @@ const initWASession = async (storeId, io) => {
     console.log(`[WA] Initializing session for store ${storeId}...`);
     
     if (sessions.has(storeId)) {
-        console.log(`[WA] Session already active for store ${storeId}. Skipping init.`);
+        console.log(`[WA] Session already active for store ${storeId}.`);
+        
+        // If we have a pending QR, re-emit it to the new socket connection
+        const lastQr = lastQrCodes.get(storeId);
+        if (lastQr && io) {
+            console.log(`[WA] Re-emitting last QR code for store ${storeId}`);
+            io.to(`store_${storeId}`).emit('wa_qr_code', { qr: lastQr });
+        }
         return;
     }
 
@@ -58,9 +66,10 @@ const initWASession = async (storeId, io) => {
 
         if (qr) {
             console.log(`[WA] New QR Code generated for store ${storeId}`);
-            // Emit QR to Socket.io for the Admin App
+            lastQrCodes.set(storeId, qr); // Cache the QR
+            // Emit QR to Socket.io for the Admin App (as JSONObject)
             if (io) {
-                io.to(`store_${storeId}`).emit('wa_qr_code', qr);
+                io.to(`store_${storeId}`).emit('wa_qr_code', { qr });
             }
         }
 
@@ -72,6 +81,7 @@ const initWASession = async (storeId, io) => {
             console.log(`[WA] Connection closed for store ${storeId}. Reason:`, lastDisconnect.error, 'Reconnect:', shouldReconnect);
             
             sessions.delete(storeId);
+            lastQrCodes.delete(storeId); // Clear QR on close
 
             if (shouldReconnect) {
                 initWASession(storeId, io);
@@ -87,6 +97,7 @@ const initWASession = async (storeId, io) => {
             }
         } else if (connection === 'open') {
             console.log(`[WA] Connection opened successfully for store ${storeId}`);
+            lastQrCodes.delete(storeId); // Clear QR on success
             await prisma.store.update({
                 where: { id: parseInt(storeId) },
                 data: { isWaBotActive: true }
