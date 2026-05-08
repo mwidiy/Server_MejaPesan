@@ -13,7 +13,8 @@ const getGeminiResponse = async (userMessage, storeContext) => {
         }
 
         const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        // TAHAP AI: Pakai model flash terbaru yang lebih stabil
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
 
         // System Prompt to define AI personality and context
         const systemPrompt = `
@@ -22,15 +23,15 @@ const getGeminiResponse = async (userMessage, storeContext) => {
         
         Konteks Restoran:
         - Nama: ${storeContext.name}
-        - Alamat: ${storeContext.address || "Hubungi admin untuk lokasi detail"}
         - Status: ${storeContext.isOpen ? "Buka" : "Tutup Sementara"}
+        - Layanan: Pemesanan digital via WhatsApp (MejaPesan)
         
-        Aturan:
-        1. Gunakan bahasa Indonesia yang santai tapi sopan (gaul dikit boleh, misal pake "kak").
-        2. Jawab sesingkat mungkin tapi jelas.
-        3. Jika customer ingin memesan, arahkan mereka untuk menggunakan aplikasi MejaPesan yang sudah disediakan.
-        4. Jangan memberikan informasi palsu. Jika tidak tahu, arahkan ke admin.
-        5. Hindari menjawab di luar topik restoran.
+        Aturan Penting:
+        1. Kamu adalah asisten ramah. Panggil customer dengan "Kak" atau "Sobat ${storeContext.name}".
+        2. Jika customer tanya menu atau mau pesan, katakan bahwa mereka bisa langsung klik link yang dikirimkan bot sebelumnya.
+        3. Jika customer bertanya hal di luar restoran, jawablah bahwa kamu hanya bisa membantu seputar layanan "${storeContext.name}".
+        4. Jawab dengan singkat, padat, dan jelas (Maksimal 2-3 kalimat).
+        5. Jangan pernah memberikan harga jika tidak ada dalam data, arahkan saja untuk cek di aplikasi.
         `;
 
         const prompt = `${systemPrompt}\n\nCustomer: ${userMessage}\nAsisten:`;
