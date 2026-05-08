@@ -192,7 +192,14 @@ const initWASession = async (storeId, io) => {
                                     name: true, 
                                     isOpen: true, 
                                     isAutoReplyEnabled: true, 
-                                    isAiEnabled: true 
+                                    isAiEnabled: true,
+                                    products: {
+                                        select: {
+                                            name: true,
+                                            isActive: true,
+                                            price: true
+                                        }
+                                    }
                                 }
                             });
 

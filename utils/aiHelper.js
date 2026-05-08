@@ -1,9 +1,8 @@
 /**
  * AI Helper for MejaPesan WhatsApp Bot
- * Powered by OpenRouter (Smart Key Rotation)
+ * Powered by OpenRouter (Smart Key Rotation & Context Injection)
  */
 
-// List of API Keys for Rolling Mechanism
 const openRouterKeys = [
     process.env.OPENROUTERAI_1,
     process.env.OPENROUTERAI_2,
@@ -11,13 +10,10 @@ const openRouterKeys = [
     process.env.OPENROUTERAI_4,
     process.env.OPENROUTERAI_5,
     process.env.OPENROUTERAI_6
-].filter(key => !!key); // Only keep valid keys
+].filter(key => !!key);
 
 let currentKeyIndex = 0;
 
-/**
- * Get next API key in rotation
- */
 const getNextApiKey = () => {
     if (openRouterKeys.length === 0) return null;
     const key = openRouterKeys[currentKeyIndex];
@@ -25,32 +21,33 @@ const getNextApiKey = () => {
     return key;
 };
 
-const getGeminiResponse = async (userMessage, storeContext) => {
+/**
+ * Main AI function with Strict Ordering Context
+ */
+const getGeminiResponse = async (userMessage, storeContext, attempt = 1) => {
     const apiKey = getNextApiKey();
-    
-    if (!apiKey) {
-        console.error("[AI] Error: No OpenRouter API Keys found in .env");
-        return null;
-    }
+    if (!apiKey) return null;
 
     try {
-        console.log(`[AI] Using Key Index: ${currentKeyIndex} (Rolling)`);
+        // Format Product List for Context
+        const productList = storeContext.products
+            ?.map(p => `- ${p.name}: ${p.isActive ? "Tersedia" : "Habis"} (Rp ${p.price.toLocaleString("id-ID")})`)
+            .join("\n") || "Daftar menu tidak tersedia.";
 
         const systemPrompt = `
-        Kamu adalah asisten pintar untuk restoran bernama "${storeContext.name}".
-        Tugas kamu adalah membalas pesan customer di WhatsApp dengan ramah, singkat, dan membantu.
+        Kamu adalah Asisten Digital ramah untuk "${storeContext.name}".
         
-        Konteks Restoran:
-        - Nama: ${storeContext.name}
-        - Status: ${storeContext.isOpen ? "Buka" : "Tutup Sementara"}
-        - Layanan: Pemesanan digital via WhatsApp (MejaPesan)
+        DATA MENU SAAT INI:
+        ${productList}
         
-        Aturan Penting:
-        1. Kamu adalah asisten ramah. Panggil customer dengan "Kak" atau "Sobat ${storeContext.name}".
-        2. Jika customer tanya menu atau mau pesan, katakan bahwa mereka bisa langsung klik link yang dikirimkan bot sebelumnya.
-        3. Jika customer bertanya hal di luar restoran, jawablah bahwa kamu hanya bisa membantu seputar layanan "${storeContext.name}".
-        4. Jawab dengan singkat, padat, dan jelas (Maksimal 2-3 kalimat).
-        5. Jangan pernah memberikan harga jika tidak ada dalam data, arahkan saja untuk cek di aplikasi.
+        ATURAN KETAT:
+        1. HANYA bahas tentang pesanan, stok menu, jam buka, dan layanan resto.
+        2. Jika customer tanya stok: Cek DATA MENU di atas. Jika "Habis", katakan maaf stok kosong.
+        3. Jika customer OOT (Out Of Topic) atau tanya hal aneh (misal: "siapa kamu", "apa arti S", "tess"): 
+           Jawab: "Maaf kak, aku asisten digital ${storeContext.name}. Ada yang bisa dibantu soal pesanan menu kami?"
+        4. JANGAN HALU. Jangan mengarang menu yang tidak ada di DATA MENU.
+        5. SINGKAT: Jawab maksimal 2 kalimat. Gunakan "Kak".
+        6. Jika customer ingin pesan: Arahkan klik link pemesanan yang dikirim bot sebelumnya.
         `;
 
         const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -58,34 +55,43 @@ const getGeminiResponse = async (userMessage, storeContext) => {
             headers: {
                 "Authorization": `Bearer ${apiKey}`,
                 "Content-Type": "application/json",
-                "HTTP-Referer": "https://quacxel.my.id", // Optional for OpenRouter
-                "X-Title": "MejaPesan Bot" // Optional for OpenRouter
+                "X-Title": "MejaPesan AI Bot"
             },
             body: JSON.stringify({
-                "model": "openrouter/free", // Let OpenRouter pick the best available free model
+                "model": "openrouter/free",
                 "messages": [
                     { "role": "system", "content": systemPrompt },
                     { "role": "user", "content": userMessage }
                 ],
-                "max_tokens": 200
+                "max_tokens": 150,
+                "temperature": 0.5 // Lower temperature = less hallucination
             })
         });
 
         const data = await response.json();
 
         if (!response.ok) {
-            console.error(`[AI] OpenRouter API Error (Key ${currentKeyIndex}):`, data.error?.message || response.statusText);
-            // If this key failed, we could recursively try next key, but for now let's return null to avoid infinite loops
-            return "Maaf kak, otak AI aku lagi istirahat bentar. Coba chat lagi nanti ya!";
+            console.error(`[AI] Error Attempt ${attempt} (Key ${currentKeyIndex}):`, data.error?.message);
+            // SMART RETRY: Try next key if not max attempts
+            if (attempt < 3) {
+                console.log(`[AI] Retrying with different key... (Attempt ${attempt + 1})`);
+                return await getGeminiResponse(userMessage, storeContext, attempt + 1);
+            }
+            throw new Error("API Limit reached across keys");
         }
 
         if (data.choices && data.choices.length > 0) {
-            return data.choices[0].message.content.trim();
+            let content = data.choices[0].message.content.trim();
+            // Anti-Short-Response-Bug: If AI returns garbage or too short like "S", retry
+            if (content.length < 2 && attempt < 3) {
+                return await getGeminiResponse(userMessage, storeContext, attempt + 1);
+            }
+            return content;
         }
 
-        return "Maaf kak, aku bingung mau jawab apa. Bisa tanya admin aja?";
+        return "Maaf kak, aku lagi bingung. Bisa tanya admin?";
     } catch (err) {
-        console.error("[AI] Fetch Error:", err.message);
+        console.error("[AI] Final Failure:", err.message);
         return "Maaf kak, koneksi AI aku lagi terganggu. Hubungi admin ya!";
     }
 };
