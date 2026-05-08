@@ -208,29 +208,29 @@ const initWASession = async (storeId, io) => {
                                 return;
                             }
 
-                            if (store.isAiEnabled) {
-                                // TAHAP AI: Use Gemini for response
-                                console.log(`[WA AI] AI is ON for store ${storeId}. Processing with Gemini...`);
-                                const aiResponse = await getGeminiResponse(body, store);
-                                if (aiResponse) {
-                                    await sock.sendMessage(from, { text: aiResponse }, { linkPreview: null });
-                                    console.log(`[WA AI] Gemini replied to ${from}`);
-                                    return;
-                                }
-                            }
-
-                            // TAHAP STATIC: Default "Magical Link" logic
                             // 1. Ensure Virtual Table Exists
                             const virtualTable = await getOrCreateVirtualTable(storeId);
                             
                             // 2. Generate Secure Link
                             const pwaUrl = process.env.PWA_URL || 'https://staging.quacxel.my.id';
-                            // TAHAP 39: Include JID Type (jt) in signature for full identity security
                             const sig = signData(`${String(storeId)}:${String(virtualTable.id)}:${String(phone)}:${String(jidType)}`);
                             
                             // 3. Construct URL with Magical Identity parameters
                             const magicalLink = `${pwaUrl}/?s=${storeId}&t=${virtualTable.id}&p=${phone}&jt=${jidType}&n=${encodeURIComponent(pushName)}&sig=${sig}`;
-                            
+
+                            if (store.isAiEnabled) {
+                                // TAHAP AI: Use Gemini for response
+                                console.log(`[WA AI] AI is ON for store ${storeId}. Processing with AI...`);
+                                // TAHAP 41: Pass the link so AI can give it to customer
+                                const aiResponse = await getGeminiResponse(body, store, magicalLink);
+                                if (aiResponse) {
+                                    await sock.sendMessage(from, { text: aiResponse }, { linkPreview: null });
+                                    console.log(`[WA AI] AI replied to ${from}`);
+                                    return;
+                                }
+                            }
+
+                            // TAHAP STATIC: Default "Magical Link" logic (If AI fails or is disabled)
                             const welcomeMsg = `Halo kak *${pushName}*! Terima kasih sudah menghubungi kami. \n\nSilakan klik link di bawah ini untuk melihat menu dan langsung memesan ya kak. Nomor WhatsApp kakak sudah terhubung otomatis: \n\n${magicalLink}`;
                             
                             await sock.sendMessage(from, { text: welcomeMsg }, { linkPreview: null });

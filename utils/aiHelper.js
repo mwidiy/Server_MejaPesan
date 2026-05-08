@@ -1,6 +1,6 @@
 /**
  * AI Helper for MejaPesan WhatsApp Bot
- * Powered by OpenRouter (Smart Key Rotation & Context Injection)
+ * Powered by OpenRouter (Human-like Personality & Proactive Sales)
  */
 
 const openRouterKeys = [
@@ -22,32 +22,37 @@ const getNextApiKey = () => {
 };
 
 /**
- * Main AI function with Strict Ordering Context
+ * Main AI function with Human-like Personality
  */
-const getGeminiResponse = async (userMessage, storeContext, attempt = 1) => {
+const getGeminiResponse = async (userMessage, storeContext, magicalLink, attempt = 1) => {
     const apiKey = getNextApiKey();
     if (!apiKey) return null;
 
     try {
-        // Format Product List for Context
-        const productList = storeContext.products
-            ?.map(p => `- ${p.name}: ${p.isActive ? "Tersedia" : "Habis"} (Rp ${p.price.toLocaleString("id-ID")})`)
-            .join("\n") || "Daftar menu tidak tersedia.";
+        // Format Product List for Context (Only Active Items)
+        const activeProducts = storeContext.products?.filter(p => p.isActive) || [];
+        const productListString = activeProducts
+            .map(p => `- ${p.name} (Rp ${p.price.toLocaleString("id-ID")})`)
+            .join("\n");
 
         const systemPrompt = `
-        Kamu adalah Asisten Digital ramah untuk "${storeContext.name}".
+        Kamu adalah asisten digital yang RAMAH, CERIA, dan PROAKTIF untuk restoran "${storeContext.name}".
+        Nama kamu adalah "Asisten MejaPesan". Gunakan bahasa Indonesia yang santai, luwes (seperti manusia), dan sopan.
         
-        DATA MENU SAAT INI:
-        ${productList}
+        DAFTAR MENU YANG TERSEDIA SAAT INI:
+        ${productListString || "Menu sedang disiapkan."}
         
-        ATURAN KETAT:
-        1. HANYA bahas tentang pesanan, stok menu, jam buka, dan layanan resto.
-        2. Jika customer tanya stok: Cek DATA MENU di atas. Jika "Habis", katakan maaf stok kosong.
-        3. Jika customer OOT (Out Of Topic) atau tanya hal aneh (misal: "siapa kamu", "apa arti S", "tess"): 
-           Jawab: "Maaf kak, aku asisten digital ${storeContext.name}. Ada yang bisa dibantu soal pesanan menu kami?"
-        4. JANGAN HALU. Jangan mengarang menu yang tidak ada di DATA MENU.
-        5. SINGKAT: Jawab maksimal 2 kalimat. Gunakan "Kak".
-        6. Jika customer ingin pesan: Arahkan klik link pemesanan yang dikirim bot sebelumnya.
+        LINK PEMESANAN KAKAK (Sangat Penting):
+        ${magicalLink}
+        
+        ATURAN KOMUNIKASI:
+        1. JANGAN KAKU. Jangan gunakan bahasa robot atau terjemahan mesin. Gunakan kata seperti "Kak", "nih", "ya", "yuk".
+        2. JIKA CUSTOMER INGIN PESAN/TANYA CARA PESAN: Berikan instruksi singkat dan sertakan LINK PEMESANAN di atas. Katakan bahwa link itu sudah otomatis terhubung ke nomor mereka.
+        3. JIKA TANYA MENU: Sebutkan 3 menu andalan dari daftar di atas secara menarik, lalu arahkan untuk lihat menu lengkap di LINK PEMESANAN.
+        4. JIKA TANYA STOK ITEM SPESIFIK: Cek daftar di atas. Jika ada, jawab dengan semangat. Jika tidak ada, katakan maaf dan tawarkan menu lain yang mirip atau andalan.
+        5. PROAKTIF: Di akhir jawaban, selalu tawarkan bantuan atau ajak memesan. Contoh: "Mau sekalian Kakak pesan sekarang?", "Ada lagi yang bikin Kakak laper?".
+        6. JIKA OOT (Out of Topic): Jawab dengan candaan halus lalu tarik kembali ke soal makanan/pesanan di "${storeContext.name}".
+        7. SINGKAT & PADAT: Maksimal 3 kalimat agar nyaman dibaca di WhatsApp.
         `;
 
         const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -63,36 +68,30 @@ const getGeminiResponse = async (userMessage, storeContext, attempt = 1) => {
                     { "role": "system", "content": systemPrompt },
                     { "role": "user", "content": userMessage }
                 ],
-                "max_tokens": 150,
-                "temperature": 0.5 // Lower temperature = less hallucination
+                "max_tokens": 250,
+                "temperature": 0.7 // Slightly higher for more natural language
             })
         });
 
         const data = await response.json();
 
         if (!response.ok) {
-            console.error(`[AI] Error Attempt ${attempt} (Key ${currentKeyIndex}):`, data.error?.message);
-            // SMART RETRY: Try next key if not max attempts
-            if (attempt < 3) {
-                console.log(`[AI] Retrying with different key... (Attempt ${attempt + 1})`);
-                return await getGeminiResponse(userMessage, storeContext, attempt + 1);
-            }
-            throw new Error("API Limit reached across keys");
+            if (attempt < 3) return await getGeminiResponse(userMessage, storeContext, magicalLink, attempt + 1);
+            throw new Error("API Limit");
         }
 
         if (data.choices && data.choices.length > 0) {
             let content = data.choices[0].message.content.trim();
-            // Anti-Short-Response-Bug: If AI returns garbage or too short like "S", retry
-            if (content.length < 2 && attempt < 3) {
-                return await getGeminiResponse(userMessage, storeContext, attempt + 1);
-            }
+            // Filter out robotic prefixes if AI adds them
+            content = content.replace(/^(Asisten|AI|Bot):/i, "").trim();
+            if (content.length < 5 && attempt < 3) return await getGeminiResponse(userMessage, storeContext, magicalLink, attempt + 1);
             return content;
         }
 
-        return "Maaf kak, aku lagi bingung. Bisa tanya admin?";
+        return "Aduh maaf Kak, koneksi aku lagi drop. Langsung klik link pemesanan aja ya!";
     } catch (err) {
-        console.error("[AI] Final Failure:", err.message);
-        return "Maaf kak, koneksi AI aku lagi terganggu. Hubungi admin ya!";
+        console.error("[AI] Error:", err.message);
+        return "Wah maaf banget Kak, sistem aku lagi istirahat bentar. Langsung pesan lewat link ini aja ya: " + magicalLink;
     }
 };
 
