@@ -104,12 +104,13 @@ const initWASession = async (storeId, io) => {
             keys: makeCacheableSignalKeyStore(state.keys, logger),
         },
         printQRInTerminal: false,
-        // TAHAP 40: Use macOS Chrome identity (Highly stable for pairing)
-        browser: ["macOS", "Chrome", "121.0.6167.184"],
+        // TAHAP 40: Standard Windows Chrome (Most trusted by WhatsApp)
+        browser: ["Windows", "Chrome", "110.0.5481.178"],
         syncFullHistory: false, 
         markOnlineOnConnect: true,
-        connectTimeoutMs: 60000, // Longer timeout for slow servers
-        defaultQueryTimeoutMs: 0
+        connectTimeoutMs: 60000,
+        defaultQueryTimeoutMs: 0,
+        qrTimeout: 40000 // Increase QR timeout to prevent loops
     });
 
     // TAHAP 40: Flag to prevent multiple pairing code requests in one session
@@ -122,43 +123,44 @@ const initWASession = async (storeId, io) => {
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-        // TAHAP 40: SPEED UP PAIRING + PREVENT SPAM
+        // TAHAP 40: SPEED UP PAIRING
         if (qr && !sock.authState.creds.registered && !sock.isPairingInProgress) {
             sock.isPairingInProgress = true; 
             console.log(`[WA] Socket ready. Requesting pairing code for ${phoneNumber}...`);
             try {
-                // Short delay to ensure socket is fully "settled" before requesting code
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                // Increased delay for stability
+                await new Promise(resolve => setTimeout(resolve, 3000));
                 const code = await sock.requestPairingCode(phoneNumber);
                 console.log(`[WA] Pairing Code for store ${storeId}: ${code}`);
                 if (io) io.to(`store_${storeId}`).emit('wa_pairing_code', { code });
             } catch (err) {
                 console.error('[WA] Pairing Code Request Failed:', err.message);
                 sock.isPairingInProgress = false; 
-                if (io) io.to(`store_${storeId}`).emit('wa_error', { message: 'Gagal ambil kode. Coba klik hubungkan lagi.' });
             }
         }
 
         if (connection === 'close') {
             const statusCode = lastDisconnect.error?.output?.statusCode || lastDisconnect.error?.statusCode;
+            const errorMsg = lastDisconnect.error?.message || '';
             const isLogout = statusCode === DisconnectReason.loggedOut;
             
-            console.log(`[WA] Connection closed for store ${storeId}. Reason: ${statusCode}. Reconnecting: ${!isLogout}`);
+            console.log(`[WA] Connection closed for store ${storeId}. Reason: ${statusCode}. Msg: ${errorMsg}`);
 
-            if (!isLogout) {
-                // TAHAP 40: Wait 5s before reconnecting to let things settle
-                setTimeout(() => initWASession(storeId, io), 5000);
-            } else {
+            if (isLogout) {
                 console.log(`[WA] Explicit logout for store ${storeId}. Cleaning up session...`);
                 if (io) io.to(`store_${storeId}`).emit('wa_status', { status: 'disconnected' });
                 if (fs.existsSync(sessionDir)) {
                     try { rimraf.sync(sessionDir); } catch(e) {}
                 }
                 sessions.delete(storeId);
+            } else {
+                // Reconnect for any other reason (timeout, crash, etc.)
+                // But wait 5s to avoid rapid loops
+                setTimeout(() => initWASession(storeId, io), 5000);
             }
         } else if (connection === 'open') {
             console.log(`[WA] Connection OPENED successfully for store ${storeId}`);
-            sock.isPairingInProgress = false; // Reset flag
+            sock.isPairingInProgress = false;
             if (io) io.to(`store_${storeId}`).emit('wa_status', { status: 'connected' });
         }
     });
