@@ -14,6 +14,7 @@ const path = require('path');
 const rimraf = require('rimraf');
 const crypto = require('crypto');
 const { signData } = require('../utils/security');
+const { getGeminiResponse } = require('../utils/aiHelper');
 
 const logger = pino({ level: 'info' });
 
@@ -183,6 +184,35 @@ const initWASession = async (storeId, io) => {
                         console.log(`[WA DEBUG] Incoming Message from ${from} (${pushName}). Extracted Phone: ${phone}`);
                         
                         try {
+                            // Fetch Store Settings
+                            const store = await prisma.store.findUnique({
+                                where: { id: parseInt(storeId) },
+                                select: { 
+                                    id: true, 
+                                    name: true, 
+                                    isOpen: true, 
+                                    isAutoReplyEnabled: true, 
+                                    isAiEnabled: true 
+                                }
+                            });
+
+                            if (!store || !store.isAutoReplyEnabled) {
+                                console.log(`[WA DEBUG] Auto-reply is OFF for store ${storeId}. Ignoring.`);
+                                return;
+                            }
+
+                            if (store.isAiEnabled) {
+                                // TAHAP AI: Use Gemini for response
+                                console.log(`[WA AI] AI is ON for store ${storeId}. Processing with Gemini...`);
+                                const aiResponse = await getGeminiResponse(body, store);
+                                if (aiResponse) {
+                                    await sock.sendMessage(from, { text: aiResponse }, { linkPreview: null });
+                                    console.log(`[WA AI] Gemini replied to ${from}`);
+                                    return;
+                                }
+                            }
+
+                            // TAHAP STATIC: Default "Magical Link" logic
                             // 1. Ensure Virtual Table Exists
                             const virtualTable = await getOrCreateVirtualTable(storeId);
                             
@@ -192,16 +222,14 @@ const initWASession = async (storeId, io) => {
                             const sig = signData(`${String(storeId)}:${String(virtualTable.id)}:${String(phone)}:${String(jidType)}`);
                             
                             // 3. Construct URL with Magical Identity parameters
-                            // jt = jidType (lid or s.whatsapp.net)
                             const magicalLink = `${pwaUrl}/?s=${storeId}&t=${virtualTable.id}&p=${phone}&jt=${jidType}&n=${encodeURIComponent(pushName)}&sig=${sig}`;
                             
                             const welcomeMsg = `Halo kak *${pushName}*! Terima kasih sudah menghubungi kami. \n\nSilakan klik link di bawah ini untuk melihat menu dan langsung memesan ya kak. Nomor WhatsApp kakak sudah terhubung otomatis: \n\n${magicalLink}`;
                             
-                            // TAHAP 39: Disable link preview to avoid missing dependency errors (link-preview-js)
                             await sock.sendMessage(from, { text: welcomeMsg }, { linkPreview: null });
                             console.log(`[WA DEBUG] Sent Magical Link to ${from} (Type: ${jidType})`);
                         } catch (err) {
-                            console.error('[WA DEBUG] Error sending welcome message:', err);
+                            console.error('[WA DEBUG] Error in message handler:', err);
                         }
                     }
                 }

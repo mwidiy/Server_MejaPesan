@@ -43,6 +43,8 @@ model Store {
   isTakeawayActive             Boolean      @default(true)
   isDeliveryActive             Boolean      @default(false)
   isWaBotActive                Boolean      @default(false)
+  isAiEnabled                  Boolean      @default(false)
+  isAutoReplyEnabled           Boolean      @default(false)
   
   arAssets                     ArAsset[]
   banners                      Banner[]

@@ -48,7 +48,7 @@ const getStore = async (req, res) => {
 // Update Info
 const updateStore = async (req, res) => {
     try {
-        let { name, isOpen, bankName, bankNumber, bankHolder, ewalletType, ewalletNumber, ewalletName, whatsappNumber, isKasirQrVerificationEnabled, cashPaymentMode, isCashActive, isDineInActive, isTakeawayActive, isDeliveryActive } = req.body;
+        let { name, isOpen, bankName, bankNumber, bankHolder, ewalletType, ewalletNumber, ewalletName, whatsappNumber, isKasirQrVerificationEnabled, cashPaymentMode, isCashActive, isDineInActive, isTakeawayActive, isDeliveryActive, isAiEnabled, isAutoReplyEnabled } = req.body;
         if (!req.storeId) return res.status(400).json({ error: 'User tidak memiliki akses Toko' });
 
         // --- HARDENING: SERVER-SIDE VALIDATION & SANITIZATION ---
@@ -111,7 +111,9 @@ const updateStore = async (req, res) => {
             isCashActive: (isCashActive === 'true' || isCashActive === true) ? true : (isCashActive === 'false' || isCashActive === false ? false : undefined),
             isDineInActive: (isDineInActive === 'true' || isDineInActive === true) ? true : (isDineInActive === 'false' || isDineInActive === false ? false : undefined),
             isTakeawayActive: (isTakeawayActive === 'true' || isTakeawayActive === true) ? true : (isTakeawayActive === 'false' || isTakeawayActive === false ? false : undefined),
-            isDeliveryActive: (isDeliveryActive === 'true' || isDeliveryActive === true) ? true : (isDeliveryActive === 'false' || isDeliveryActive === false ? false : undefined)
+            isDeliveryActive: (isDeliveryActive === 'true' || isDeliveryActive === true) ? true : (isDeliveryActive === 'false' || isDeliveryActive === false ? false : undefined),
+            isAiEnabled: (isAiEnabled === 'true' || isAiEnabled === true) ? true : (isAiEnabled === 'false' || isAiEnabled === false ? false : undefined),
+            isAutoReplyEnabled: (isAutoReplyEnabled === 'true' || isAutoReplyEnabled === true) ? true : (isAutoReplyEnabled === 'false' || isAutoReplyEnabled === false ? false : undefined)
         };
 
         const storeIdInt = parseInt(req.storeId);
