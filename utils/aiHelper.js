@@ -1,22 +1,41 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
-
 /**
  * AI Helper for MejaPesan WhatsApp Bot
- * Powered by Google Gemini
+ * Powered by OpenRouter (Smart Key Rotation)
  */
+
+// List of API Keys for Rolling Mechanism
+const openRouterKeys = [
+    process.env.OPENROUTERAI_1,
+    process.env.OPENROUTERAI_2,
+    process.env.OPENROUTERAI_3,
+    process.env.OPENROUTERAI_4,
+    process.env.OPENROUTERAI_5,
+    process.env.OPENROUTERAI_6
+].filter(key => !!key); // Only keep valid keys
+
+let currentKeyIndex = 0;
+
+/**
+ * Get next API key in rotation
+ */
+const getNextApiKey = () => {
+    if (openRouterKeys.length === 0) return null;
+    const key = openRouterKeys[currentKeyIndex];
+    currentKeyIndex = (currentKeyIndex + 1) % openRouterKeys.length;
+    return key;
+};
+
 const getGeminiResponse = async (userMessage, storeContext) => {
+    const apiKey = getNextApiKey();
+    
+    if (!apiKey) {
+        console.error("[AI] Error: No OpenRouter API Keys found in .env");
+        return null;
+    }
+
     try {
-        const apiKey = process.env.AI_APIKEY_GOOGLE;
-        if (!apiKey) {
-            console.error("[AI] Error: AI_APIKEY_GOOGLE is missing in .env");
-            return null;
-        }
+        console.log(`[AI] Using Key Index: ${currentKeyIndex} (Rolling)`);
 
-        const genAI = new GoogleGenerativeAI(apiKey);
-        // TAHAP AI: Pakai model flash terbaru yang lebih stabil
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
-
-        // System Prompt to define AI personality and context
         const systemPrompt = `
         Kamu adalah asisten pintar untuk restoran bernama "${storeContext.name}".
         Tugas kamu adalah membalas pesan customer di WhatsApp dengan ramah, singkat, dan membantu.
@@ -34,14 +53,40 @@ const getGeminiResponse = async (userMessage, storeContext) => {
         5. Jangan pernah memberikan harga jika tidak ada dalam data, arahkan saja untuk cek di aplikasi.
         `;
 
-        const prompt = `${systemPrompt}\n\nCustomer: ${userMessage}\nAsisten:`;
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${apiKey}`,
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://quacxel.my.id", // Optional for OpenRouter
+                "X-Title": "MejaPesan Bot" // Optional for OpenRouter
+            },
+            body: JSON.stringify({
+                "model": "openrouter/free", // Let OpenRouter pick the best available free model
+                "messages": [
+                    { "role": "system", "content": systemPrompt },
+                    { "role": "user", "content": userMessage }
+                ],
+                "max_tokens": 200
+            })
+        });
 
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text();
+        const data = await response.json();
+
+        if (!response.ok) {
+            console.error(`[AI] OpenRouter API Error (Key ${currentKeyIndex}):`, data.error?.message || response.statusText);
+            // If this key failed, we could recursively try next key, but for now let's return null to avoid infinite loops
+            return "Maaf kak, otak AI aku lagi istirahat bentar. Coba chat lagi nanti ya!";
+        }
+
+        if (data.choices && data.choices.length > 0) {
+            return data.choices[0].message.content.trim();
+        }
+
+        return "Maaf kak, aku bingung mau jawab apa. Bisa tanya admin aja?";
     } catch (err) {
-        console.error("[AI] Gemini Error:", err.message);
-        return "Maaf kak, otak AI aku lagi loading. Bisa chat lagi nanti? atau hubungi admin ya!";
+        console.error("[AI] Fetch Error:", err.message);
+        return "Maaf kak, koneksi AI aku lagi terganggu. Hubungi admin ya!";
     }
 };
 
