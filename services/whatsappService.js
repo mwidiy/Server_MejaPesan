@@ -135,21 +135,20 @@ const initWASession = async (storeId, io) => {
         }
 
         if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect.error instanceof Boom) 
-                ? lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut 
-                : true;
-            
-            sessions.delete(storeId);
+            const statusCode = lastDisconnect.error?.output?.statusCode;
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+
+            console.log(`[WA] Connection closed for store ${storeId}. Reason: ${statusCode}. Reconnecting: ${shouldReconnect}`);
+
             if (shouldReconnect) {
-                initWASession(storeId, io);
+                // TAHAP 40: Delay reconnection slightly to avoid rapid loops
+                setTimeout(() => initWASession(storeId, io), 3000);
             } else {
-                console.log(`[WA] Logged out from store ${storeId}. Cleaning up...`);
-                if (fs.existsSync(sessionDir)) rimraf.sync(sessionDir);
-                await prisma.store.update({
-                    where: { id: parseInt(storeId) },
-                    data: { isWaBotActive: false }
-                });
+                console.log(`[WA] Explicit logged out for store ${storeId}. Cleaning up...`);
                 if (io) io.to(`store_${storeId}`).emit('wa_status', { status: 'disconnected' });
+                
+                if (fs.existsSync(sessionDir)) rimraf.sync(sessionDir);
+                sessions.delete(storeId);
             }
         } else if (connection === 'open') {
             console.log(`[WA] Connection opened successfully for store ${storeId}`);
