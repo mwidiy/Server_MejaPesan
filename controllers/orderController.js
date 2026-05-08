@@ -211,11 +211,17 @@ const createOrder = async (req, res) => {
             });
         }
 
-        // --- NEW: Calculate Estimated Target Time (QUEUE-AWARE) ---
-        let maxPrepTime = 10; // Global Default
-        if (products.length > 0) {
-            const prepTimes = products.map(p => p.category?.defaultPrepTime || 10);
-            maxPrepTime = Math.max(...prepTimes);
+        // --- NEW: Calculate Estimated Target Time (QUANTITY-AWARE) ---
+        // TAHAP 40: Linear scaling based on item quantity as requested by USER
+        let totalPrepTime = 0;
+        if (items.length > 0) {
+            items.forEach(item => {
+                const product = productMap[item.productId];
+                const prepTime = product?.category?.defaultPrepTime || 10;
+                totalPrepTime += (prepTime * item.quantity);
+            });
+        } else {
+            totalPrepTime = 10; // Default fallback
         }
         
         // 1. Cari antrean terakhir di toko ini yang masih Pending/Processing
@@ -230,7 +236,7 @@ const createOrder = async (req, res) => {
         });
 
         const targetTime = new Date(latestOrderInQueue?.targetTime || new Date());
-        targetTime.setMinutes(targetTime.getMinutes() + maxPrepTime);
+        targetTime.setMinutes(targetTime.getMinutes() + totalPrepTime);
 
         // 5. Generate Transaction Code Unik
         const transactionCode = generateTransactionCode();
