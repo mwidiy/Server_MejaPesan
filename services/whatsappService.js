@@ -89,8 +89,8 @@ const initWASession = async (storeId, io) => {
     }
 
     const sessionDir = path.join(__dirname, '../sessions', `store_${storeId}`);
-    if (!fs.existsSync(path.join(__dirname, '../sessions'))) {
-        fs.mkdirSync(path.join(__dirname, '../sessions'));
+    if (!fs.existsSync(sessionDir)) {
+        fs.mkdirSync(sessionDir, { recursive: true });
     }
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionDir);

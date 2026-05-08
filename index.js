@@ -320,7 +320,7 @@ const startServer = () => {
             // Retry after a short delay
             setTimeout(() => {
               console.log('🔄 Retrying server start...');
-              runningServerInstance.close(); // Ensure handle is closed
+              runningServer.close(); // Ensure handle is closed
               startServer(); // Recursive retry
             }, 1000);
           } else {
@@ -346,10 +346,14 @@ const activeServer = startServer();
 // --- GRACEFUL SHUTDOWN ---
 const gracefulShutdown = () => {
   console.log('Received kill signal, shutting down gracefully');
-  activeServer.close(() => {
-    console.log('Closed out remaining connections');
+  if (activeServer) {
+    activeServer.close(() => {
+      console.log('Closed out remaining connections');
+      process.exit(0);
+    });
+  } else {
     process.exit(0);
-  });
+  }
 
   // Force close after 10s
   setTimeout(() => {
