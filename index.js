@@ -28,10 +28,12 @@ const server = http.createServer(app); // Bungkus app express dengan HTTP server
 // Inisialisasi Socket.IO
 const io = new Server(server, {
   cors: {
-    origin: "*", // Izinkan koneksi dari semua origin
+    origin: "*", 
     methods: ["GET", "POST", "PUT", "DELETE"]
   }
 });
+
+global.ioInstance = io; // TAHAP 40: Store globally for services
 
 const PORT = process.env.PORT || 3000;
 

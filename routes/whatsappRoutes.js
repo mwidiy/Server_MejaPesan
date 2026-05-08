@@ -14,6 +14,19 @@ const handleInit = async (req, res) => {
         const storeId = req.storeId;
         if (!storeId) return res.status(400).json({ success: false, message: 'Store ID tidak ditemukan.' });
 
+        // TAHAP 40: Strict Real-time Validation (Always re-fetch from DB)
+        const store = await prisma.store.findUnique({
+            where: { id: parseInt(storeId) },
+            select: { whatsappNumber: true }
+        });
+
+        if (!store || !store.whatsappNumber) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Gagal: Nomor WhatsApp belum diatur di Pengaturan Resto.' 
+            });
+        }
+
         const existingSock = sessions.get(parseInt(storeId));
         if (existingSock && existingSock.user) {
             return res.json({ success: true, message: 'WhatsApp sudah terhubung.', status: 'connected' });

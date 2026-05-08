@@ -269,6 +269,10 @@ const disconnectWA = async (storeId) => {
         if (sock) {
             // TAHAP 40: Proper Logout
             try {
+                // Emit status immediately for UX speed
+                const io = global.ioInstance; // Or handle via parameter
+                if (io) io.to(`store_${storeId}`).emit('wa_status', { status: 'disconnected' });
+                
                 await sock.logout();
             } catch (err) {
                 console.warn(`[WA] Socket logout warning for store ${storeId}:`, err.message);
