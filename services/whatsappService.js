@@ -104,9 +104,12 @@ const initWASession = async (storeId, io) => {
             keys: makeCacheableSignalKeyStore(state.keys, logger),
         },
         printQRInTerminal: false,
-        browser: ["Ubuntu", "Chrome", "121.0.6167.184"],
+        // TAHAP 40: Use macOS Chrome identity (Highly stable for pairing)
+        browser: ["macOS", "Chrome", "121.0.6167.184"],
         syncFullHistory: false, 
-        markOnlineOnConnect: true
+        markOnlineOnConnect: true,
+        connectTimeoutMs: 60000, // Longer timeout for slow servers
+        defaultQueryTimeoutMs: 0
     });
 
     // TAHAP 40: Flag to prevent multiple pairing code requests in one session
@@ -121,41 +124,41 @@ const initWASession = async (storeId, io) => {
 
         // TAHAP 40: SPEED UP PAIRING + PREVENT SPAM
         if (qr && !sock.authState.creds.registered && !sock.isPairingInProgress) {
-            sock.isPairingInProgress = true; // Set flag IMMEDIATELY
-            console.log(`[WA] Connection ready for pairing. Requesting code for ${phoneNumber}...`);
+            sock.isPairingInProgress = true; 
+            console.log(`[WA] Socket ready. Requesting pairing code for ${phoneNumber}...`);
             try {
+                // Short delay to ensure socket is fully "settled" before requesting code
+                await new Promise(resolve => setTimeout(resolve, 2000));
                 const code = await sock.requestPairingCode(phoneNumber);
                 console.log(`[WA] Pairing Code for store ${storeId}: ${code}`);
                 if (io) io.to(`store_${storeId}`).emit('wa_pairing_code', { code });
             } catch (err) {
-                console.error('[WA] Pairing Code Error:', err.message);
-                sock.isPairingInProgress = false; // Reset on error to allow retry
-                if (io) io.to(`store_${storeId}`).emit('wa_error', { message: 'Gagal ambil kode. Cek nomor di profil.' });
+                console.error('[WA] Pairing Code Request Failed:', err.message);
+                sock.isPairingInProgress = false; 
+                if (io) io.to(`store_${storeId}`).emit('wa_error', { message: 'Gagal ambil kode. Coba klik hubungkan lagi.' });
             }
         }
 
         if (connection === 'close') {
-            const statusCode = lastDisconnect.error?.output?.statusCode;
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+            const statusCode = lastDisconnect.error?.output?.statusCode || lastDisconnect.error?.statusCode;
+            const isLogout = statusCode === DisconnectReason.loggedOut;
+            
+            console.log(`[WA] Connection closed for store ${storeId}. Reason: ${statusCode}. Reconnecting: ${!isLogout}`);
 
-            console.log(`[WA] Connection closed for store ${storeId}. Reason: ${statusCode}. Reconnecting: ${shouldReconnect}`);
-
-            if (shouldReconnect) {
-                // TAHAP 40: Delay reconnection slightly to avoid rapid loops
-                setTimeout(() => initWASession(storeId, io), 3000);
+            if (!isLogout) {
+                // TAHAP 40: Wait 5s before reconnecting to let things settle
+                setTimeout(() => initWASession(storeId, io), 5000);
             } else {
-                console.log(`[WA] Explicit logged out for store ${storeId}. Cleaning up...`);
+                console.log(`[WA] Explicit logout for store ${storeId}. Cleaning up session...`);
                 if (io) io.to(`store_${storeId}`).emit('wa_status', { status: 'disconnected' });
-                
-                if (fs.existsSync(sessionDir)) rimraf.sync(sessionDir);
+                if (fs.existsSync(sessionDir)) {
+                    try { rimraf.sync(sessionDir); } catch(e) {}
+                }
                 sessions.delete(storeId);
             }
         } else if (connection === 'open') {
-            console.log(`[WA] Connection opened successfully for store ${storeId}`);
-            await prisma.store.update({
-                where: { id: parseInt(storeId) },
-                data: { isWaBotActive: true }
-            });
+            console.log(`[WA] Connection OPENED successfully for store ${storeId}`);
+            sock.isPairingInProgress = false; // Reset flag
             if (io) io.to(`store_${storeId}`).emit('wa_status', { status: 'connected' });
         }
     });
