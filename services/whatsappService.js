@@ -104,11 +104,13 @@ const initWASession = async (storeId, io) => {
             keys: makeCacheableSignalKeyStore(state.keys, logger),
         },
         printQRInTerminal: false,
-        // TAHAP 40: Use official browser info for better pairing compatibility
         browser: ["Ubuntu", "Chrome", "121.0.6167.184"],
         syncFullHistory: false, 
         markOnlineOnConnect: true
     });
+
+    // TAHAP 40: Flag to prevent multiple pairing code requests in one session
+    sock.isPairingInProgress = false;
 
     sessions.set(storeId, sock);
 
@@ -117,10 +119,9 @@ const initWASession = async (storeId, io) => {
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-        // TAHAP 40: SPEED UP PAIRING
-        // Instead of blind timeout, wait for 'qr' event or a specific state
-        // If we get a 'qr', it means WhatsApp is ready to pair
-        if (qr && !sock.authState.creds.registered) {
+        // TAHAP 40: SPEED UP PAIRING + PREVENT SPAM
+        if (qr && !sock.authState.creds.registered && !sock.isPairingInProgress) {
+            sock.isPairingInProgress = true; // Set flag IMMEDIATELY
             console.log(`[WA] Connection ready for pairing. Requesting code for ${phoneNumber}...`);
             try {
                 const code = await sock.requestPairingCode(phoneNumber);
@@ -128,6 +129,7 @@ const initWASession = async (storeId, io) => {
                 if (io) io.to(`store_${storeId}`).emit('wa_pairing_code', { code });
             } catch (err) {
                 console.error('[WA] Pairing Code Error:', err.message);
+                sock.isPairingInProgress = false; // Reset on error to allow retry
                 if (io) io.to(`store_${storeId}`).emit('wa_error', { message: 'Gagal ambil kode. Cek nomor di profil.' });
             }
         }
