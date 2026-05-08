@@ -60,7 +60,7 @@ const getOrCreateVirtualTable = async (storeId) => {
  * Initialize a WhatsApp session for a specific store (Pairing Code Only)
  */
 const initWASession = async (storeId, io) => {
-    // TAHAP 40: Fetch phone number from DB if not provided
+    // TAHAP 40: Fetch phone number from DB
     const store = await prisma.store.findUnique({
         where: { id: parseInt(storeId) },
         select: { whatsappNumber: true }
@@ -72,7 +72,12 @@ const initWASession = async (storeId, io) => {
         return null;
     }
 
-    const phoneNumber = store.whatsappNumber.replace(/\D/g, '');
+    // TAHAP 40: ROBUST PHONE FORMATTING (Must be international without +)
+    let phoneNumber = store.whatsappNumber.replace(/\D/g, '');
+    if (phoneNumber.startsWith('0')) {
+        phoneNumber = '62' + phoneNumber.slice(1);
+    }
+    // If it starts with 62 but was entered as +62, the replace(/\D/g) already handled it.
 
     // Prevent duplicate initialization
     const existingSock = sessions.get(storeId);
@@ -98,33 +103,34 @@ const initWASession = async (storeId, io) => {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, logger),
         },
-        printQRInTerminal: false, // QR is now disabled
-        browser: ['MejaPesan Bot', 'Chrome', '121.0.6167.184'], 
+        printQRInTerminal: false,
+        // TAHAP 40: Use official browser info for better pairing compatibility
+        browser: ["Ubuntu", "Chrome", "121.0.6167.184"],
         syncFullHistory: false, 
         markOnlineOnConnect: true
     });
 
     sessions.set(storeId, sock);
 
-    // TAHAP 40: Always Request Pairing Code if not registered
-    if (!sock.authState.creds.registered) {
-        console.log(`[WA] Requesting Pairing Code for ${phoneNumber}...`);
-        setTimeout(async () => {
+    sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+
+        // TAHAP 40: SPEED UP PAIRING
+        // Instead of blind timeout, wait for 'qr' event or a specific state
+        // If we get a 'qr', it means WhatsApp is ready to pair
+        if (qr && !sock.authState.creds.registered) {
+            console.log(`[WA] Connection ready for pairing. Requesting code for ${phoneNumber}...`);
             try {
                 const code = await sock.requestPairingCode(phoneNumber);
                 console.log(`[WA] Pairing Code for store ${storeId}: ${code}`);
                 if (io) io.to(`store_${storeId}`).emit('wa_pairing_code', { code });
             } catch (err) {
-                console.error('[WA] Failed to request pairing code:', err);
-                if (io) io.to(`store_${storeId}`).emit('wa_error', { message: 'Gagal meminta kode pairing.' });
+                console.error('[WA] Pairing Code Error:', err.message);
+                if (io) io.to(`store_${storeId}`).emit('wa_error', { message: 'Gagal ambil kode. Cek nomor di profil.' });
             }
-        }, 3000);
-    }
-
-    sock.ev.on('creds.update', saveCreds);
-
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect } = update;
+        }
 
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect.error instanceof Boom) 
