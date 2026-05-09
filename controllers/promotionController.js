@@ -8,7 +8,7 @@ const { signData } = require('../utils/security');
  */
 const getPromotionStats = async (req, res) => {
     try {
-        const storeId = req.user.store.id;
+        const storeId = req.storeId;
         const now = new Date();
         const thirtyDaysAgo = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
         const fourteenDaysAgo = new Date(now.getTime() - (14 * 24 * 60 * 60 * 1000));
@@ -50,7 +50,7 @@ const getPromotionStats = async (req, res) => {
  */
 const startBroadcast = async (req, res) => {
     try {
-        const storeId = req.user.store.id;
+        const storeId = req.storeId;
         const { type } = req.body; // 'LOYAL' or 'CHURNING'
         
         const store = await prisma.store.findUnique({
@@ -120,13 +120,16 @@ const startBroadcast = async (req, res) => {
  */
 async function processBroadcast(storeId, targets, type, store) {
     const sock = getSocketByStoreId(storeId);
-    if (!sock) return;
 
     // TAHAP 43: Ensure virtual table exists for correct link context
     const virtualTable = await getOrCreateVirtualTable(storeId);
-    const pwaUrl = process.env.PWA_URL || 'https://staging.quacxel.my.id';
+    console.log(`[Promotion] Starting Broadcast for Store ${storeId} to ${targets.length} targets. Sock Status: ${sock ? 'ONLINE' : 'OFFLINE'}`);
+    if (!sock) {
+        console.error(`[Promotion] CRITICAL: WhatsApp Socket not found for Store ${storeId}. Aborting broadcast.`);
+        return;
+    }
 
-    console.log(`[Promotion] Starting Broadcast for Store ${storeId} to ${targets.length} targets.`);
+    const pwaUrl = process.env.PWA_URL || 'https://staging.quacxel.my.id';
 
     for (let i = 0; i < targets.length; i++) {
         const target = targets[i];
