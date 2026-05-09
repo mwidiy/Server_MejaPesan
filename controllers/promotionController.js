@@ -134,6 +134,10 @@ async function processBroadcast(storeId, targets, type, store) {
     for (let i = 0; i < targets.length; i++) {
         const target = targets[i];
         
+        // TAHAP 43: Robust Phone Formatting
+        const cleanPhone = formatPhone(target.customerPhone);
+        if (!cleanPhone) continue;
+
         // 1. Variasi Greeting (Natural)
         const greetings = ["Halo", "Hai", "Selamat Siang", "Permisi"];
         const greeting = greetings[Math.floor(Math.random() * greetings.length)];
@@ -143,7 +147,7 @@ async function processBroadcast(storeId, targets, type, store) {
         const jidType = 's.whatsapp.net'; // Default for broadcast
         const sig = signData(`${String(storeId)}:${String(virtualTable.id)}:${String(phone)}:${String(jidType)}`);
         const magicalLink = `${pwaUrl}/?s=${storeId}&t=${virtualTable.id}&p=${phone}&jt=${jidType}&n=${encodeURIComponent(target.customerName)}&sig=${sig}&src=promo`;
-
+        
         // 3. Template Selection
         let message = "";
         if (type === 'LOYAL') {
@@ -153,29 +157,22 @@ async function processBroadcast(storeId, targets, type, store) {
         }
 
         try {
-            // TAHAP 43: Clean phone number (remove any non-digits)
-            const cleanPhone = target.customerPhone.replace(/\D/g, '');
+            // TAHAP 43: Send with linkPreview: false to avoid link-preview-js dependency issues
+            await sock.sendMessage(`${cleanPhone}@s.whatsapp.net`, { 
+                text: message,
+                linkPreview: null 
+            });
             
-            // Only send if it looks like a real phone number (not a weird LID or short ID)
-            if (cleanPhone.length >= 10) {
-                await sock.sendMessage(`${cleanPhone}@s.whatsapp.net`, { 
-                    text: message,
-                    linkPreview: null // TAHAP 43: Disable link preview to avoid BAILEYS dependency errors
-                });
-                
-                // Log to DB
-                await prisma.promotionLog.create({
-                    data: {
-                        storeId,
-                        customerPhone: target.customerPhone,
-                        type: type
-                    }
-                });
-                
-                console.log(`[Promotion] Sent ${type} to ${cleanPhone} (${i + 1}/${targets.length})`);
-            } else {
-                console.warn(`[Promotion] Skipping invalid phone: ${target.customerPhone}`);
-            }
+            // Log to DB
+            await prisma.promotionLog.create({
+                data: {
+                    storeId,
+                    customerPhone: target.customerPhone,
+                    type: type
+                }
+            });
+            
+            console.log(`[Promotion] Sent ${type} to ${cleanPhone} (${i + 1}/${targets.length})`);
         } catch (err) {
             console.error(`[Promotion] Failed to send to ${target.customerPhone}:`, err.message);
         }
@@ -188,6 +185,21 @@ async function processBroadcast(storeId, targets, type, store) {
     }
     
     console.log(`[Promotion] Broadcast for Store ${storeId} COMPLETED.`);
+}
+
+/**
+ * Helper to format phone for WhatsApp
+ */
+function formatPhone(phone) {
+    if (!phone) return null;
+    let clean = phone.replace(/\D/g, '');
+    if (clean.startsWith('0')) {
+        clean = '62' + clean.slice(1);
+    }
+    if (!clean.startsWith('62')) {
+        clean = '62' + clean;
+    }
+    return clean;
 }
 
 module.exports = { getPromotionStats, startBroadcast };
