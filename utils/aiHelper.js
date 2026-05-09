@@ -81,10 +81,17 @@ const getGeminiResponse = async (userMessage, storeContext, magicalLink, attempt
         }
 
         if (data.choices && data.choices.length > 0) {
-            let content = data.choices[0].message.content.trim();
+            let content = data.choices[0].message?.content;
+            
+            // Anti-Crash & Anti-Short-Response: If AI returns null or garbage, retry
+            if (!content || content.length < 5) {
+                if (attempt < 3) return await getGeminiResponse(userMessage, storeContext, magicalLink, attempt + 1);
+                return "Maaf Kak, aku lagi sedikit bingung nih. Bisa tanya admin atau langsung klik link pemesanan ya!";
+            }
+
+            content = content.trim();
             // Filter out robotic prefixes if AI adds them
             content = content.replace(/^(Asisten|AI|Bot):/i, "").trim();
-            if (content.length < 5 && attempt < 3) return await getGeminiResponse(userMessage, storeContext, magicalLink, attempt + 1);
             return content;
         }
 

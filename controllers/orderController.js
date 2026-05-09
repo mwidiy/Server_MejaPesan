@@ -744,13 +744,15 @@ const getOrderByTransactionCode = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Order not found' });
         }
 
-        // TASK 2: SMART QUEUE 4.0 - QUEUE CALCULATION OFFLOADING
-        // Instead of DB queries, we use RAM-based cache for extreme speed and lower DB load.
+        let queuePosition = 0;
+        let ordersAhead = 0;
+
         const storeCache = storeQueueTimeCache.get(`store_${order.storeId}`);
         const orderQueueData = storeCache?.orderMap?.[order.transactionCode];
 
         if (orderQueueData) {
             queuePosition = orderQueueData.position;
+            ordersAhead = Math.max(0, queuePosition - 1);
             console.log(`[Queue Cache] HIT: ${order.transactionCode} (Pos: ${queuePosition})`);
         } else {
             // Background update if cache is missing/stale
@@ -763,7 +765,7 @@ const getOrderByTransactionCode = async (req, res) => {
             data: {
                 ...order,
                 queuePosition: queuePosition,
-                ordersAhead: Math.max(0, queuePosition - 1)
+                ordersAhead: ordersAhead
             }
         });
     } catch (error) {

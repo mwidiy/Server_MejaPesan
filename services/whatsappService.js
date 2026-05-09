@@ -154,15 +154,26 @@ const initWASession = async (storeId, io) => {
                     try { rimraf.sync(sessionDir); } catch(e) {}
                 }
                 sessions.delete(storeId);
+
+                // Update DB status so it won't restart
+                prisma.store.update({
+                    where: { id: parseInt(storeId) },
+                    data: { isWaBotActive: false }
+                }).catch(e => console.error(`[WA] Failed to update DB status for store ${storeId}:`, e.message));
             } else {
                 // Reconnect for any other reason (timeout, crash, etc.)
-                // But wait 5s to avoid rapid loops
                 setTimeout(() => initWASession(storeId, io), 5000);
             }
         } else if (connection === 'open') {
             console.log(`[WA] Connection OPENED successfully for store ${storeId}`);
             sock.isPairingInProgress = false;
             if (io) io.to(`store_${storeId}`).emit('wa_status', { status: 'connected' });
+
+            // Ensure isWaBotActive is TRUE in DB for persistence on restart
+            prisma.store.update({
+                where: { id: parseInt(storeId) },
+                data: { isWaBotActive: true }
+            }).catch(e => console.error(`[WA] Failed to update DB status for store ${storeId}:`, e.message));
         }
     });
 
