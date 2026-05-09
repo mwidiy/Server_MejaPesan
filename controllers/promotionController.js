@@ -95,7 +95,12 @@ const startBroadcast = async (req, res) => {
         });
         const recentPhones = new Set(recentLogs.map(l => l.customerPhone));
         
-        const finalTargets = targets.filter(t => !recentPhones.has(t.customerPhone));
+        const finalTargets = targets.map(t => {
+            return {
+                customerPhone: t.customerPhone || t.customerphone || t.customer_phone,
+                customerName: t.customerName || t.customername || t.customer_name || 'Pelanggan'
+            };
+        }).filter(t => t.customerPhone && !recentPhones.has(t.customerPhone));
 
         if (finalTargets.length === 0) {
             return res.status(200).json({ success: true, message: 'Tidak ada target promosi baru saat ini' });
@@ -134,9 +139,15 @@ async function processBroadcast(storeId, targets, type, store) {
     for (let i = 0; i < targets.length; i++) {
         const target = targets[i];
         
-        // TAHAP 43: Robust Phone Formatting
-        const cleanPhone = formatPhone(target.customerPhone);
-        if (!cleanPhone) continue;
+        // TAHAP 45: Robust ID Extraction (Handle case-sensitivity from raw SQL)
+        const rawPhone = target.customerPhone;
+        const rawName = target.customerName;
+
+        const cleanPhone = formatPhone(rawPhone);
+        if (!cleanPhone) {
+            console.warn(`[Promotion] Skipping target with invalid phone:`, target);
+            continue;
+        }
 
         // TAHAP 44: Determine JID Type (LID vs PN)
         const isLid = cleanPhone.length >= 14 && cleanPhone.startsWith('1');
@@ -148,37 +159,34 @@ async function processBroadcast(storeId, targets, type, store) {
         const greeting = greetings[Math.floor(Math.random() * greetings.length)];
         
         // 2. Generate Magical Link with proper signing
-        const phone = target.customerPhone; // Original stored ID
+        const phone = rawPhone; // Original stored ID (LID or PN)
         const sig = signData(`${String(storeId)}:${String(virtualTable.id)}:${String(phone)}:${String(jidType)}`);
-        const magicalLink = `${pwaUrl}/?s=${storeId}&t=${virtualTable.id}&p=${phone}&jt=${jidType}&n=${encodeURIComponent(target.customerName)}&sig=${sig}&src=promo`;
+        const magicalLink = `${pwaUrl}/?s=${storeId}&t=${virtualTable.id}&p=${phone}&jt=${jidType}&n=${encodeURIComponent(rawName)}&sig=${sig}&src=promo`;
         
         // 3. Template Selection
         let message = "";
         if (type === 'LOYAL') {
-            message = `${greeting} Kak *${target.customerName}*! Terima kasih banyak sudah jadi pelanggan setia *${store.name}*. Kami sangat menghargai kehadiran Kakak nih. Mampir lagi yuk hari ini, menu andalan kami siap melayani: \n\n${magicalLink}`;
+            message = `${greeting} Kak *${rawName}*! Terima kasih banyak sudah jadi pelanggan setia *${store.name}*. Kami sangat menghargai kehadiran Kakak nih. Mampir lagi yuk hari ini, menu andalan kami siap melayani: \n\n${magicalLink}`;
         } else {
-            message = `${greeting} Kak *${target.customerName}*! *${store.name}* kangen nih, udah lama Kakak nggak mampir. Yuk cek menu terbaru kita atau pesan lagi lewat link ini ya: \n\n${magicalLink}`;
+            message = `${greeting} Kak *${rawName}*! *${store.name}* kangen nih, udah lama Kakak nggak mampir. Yuk cek menu terbaru kita atau pesan lagi lewat link ini ya: \n\n${magicalLink}`;
         }
 
         try {
-            // TAHAP 44: Send to proper JID (LID or PN)
-            await sock.sendMessage(`${cleanPhone}${jidSuffix}`, { 
-                text: message,
-                linkPreview: null 
-            });
+            // TAHAP 45: sendMessage(jid, content, options) -> options as 3rd arg
+            await sock.sendMessage(`${cleanPhone}${jidSuffix}`, { text: message }, { linkPreview: null });
             
             // Log to DB
             await prisma.promotionLog.create({
                 data: {
                     storeId,
-                    customerPhone: target.customerPhone,
+                    customerPhone: rawPhone,
                     type: type
                 }
             });
             
-            console.log(`[Promotion] Sent ${type} to ${cleanPhone} (${i + 1}/${targets.length})`);
+            console.log(`[Promotion] Sent ${type} to ${cleanPhone}${jidSuffix} (${i + 1}/${targets.length})`);
         } catch (err) {
-            console.error(`[Promotion] Failed to send to ${target.customerPhone}:`, err.message);
+            console.error(`[Promotion] Failed to send to ${rawPhone}:`, err.message);
         }
 
         // 4. RANDOM DELAY (30-60 seconds) - ANTI BAN
