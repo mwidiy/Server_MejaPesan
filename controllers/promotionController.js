@@ -138,13 +138,17 @@ async function processBroadcast(storeId, targets, type, store) {
         const cleanPhone = formatPhone(target.customerPhone);
         if (!cleanPhone) continue;
 
+        // TAHAP 44: Determine JID Type (LID vs PN)
+        const isLid = cleanPhone.length >= 14 && cleanPhone.startsWith('1');
+        const jidSuffix = isLid ? '@lid' : '@s.whatsapp.net';
+        const jidType = isLid ? 'lid' : 's.whatsapp.net';
+
         // 1. Variasi Greeting (Natural)
         const greetings = ["Halo", "Hai", "Selamat Siang", "Permisi"];
         const greeting = greetings[Math.floor(Math.random() * greetings.length)];
         
         // 2. Generate Magical Link with proper signing
-        const phone = target.customerPhone;
-        const jidType = 's.whatsapp.net'; // Default for broadcast
+        const phone = target.customerPhone; // Original stored ID
         const sig = signData(`${String(storeId)}:${String(virtualTable.id)}:${String(phone)}:${String(jidType)}`);
         const magicalLink = `${pwaUrl}/?s=${storeId}&t=${virtualTable.id}&p=${phone}&jt=${jidType}&n=${encodeURIComponent(target.customerName)}&sig=${sig}&src=promo`;
         
@@ -157,8 +161,8 @@ async function processBroadcast(storeId, targets, type, store) {
         }
 
         try {
-            // TAHAP 43: Send with linkPreview: false to avoid link-preview-js dependency issues
-            await sock.sendMessage(`${cleanPhone}@s.whatsapp.net`, { 
+            // TAHAP 44: Send to proper JID (LID or PN)
+            await sock.sendMessage(`${cleanPhone}${jidSuffix}`, { 
                 text: message,
                 linkPreview: null 
             });
@@ -193,6 +197,12 @@ async function processBroadcast(storeId, targets, type, store) {
 function formatPhone(phone) {
     if (!phone) return null;
     let clean = phone.replace(/\D/g, '');
+    
+    // TAHAP 44: LID Detection (Starts with 1 and long)
+    if (clean.length >= 14 && clean.startsWith('1')) {
+        return clean; // Return as-is for LID
+    }
+
     if (clean.startsWith('0')) {
         clean = '62' + clean.slice(1);
     }
