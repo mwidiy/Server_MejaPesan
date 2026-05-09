@@ -96,18 +96,27 @@ const startBroadcast = async (req, res) => {
         const recentPhones = new Set(recentLogs.map(l => l.customerPhone));
         
         const finalTargets = targets.map(t => {
-            return {
-                customerPhone: t.customerPhone || t.customerphone || t.customer_phone,
-                customerName: t.customerName || t.customername || t.customer_name || 'Pelanggan'
-            };
-        }).filter(t => t.customerPhone && !recentPhones.has(t.customerPhone));
+            const p = t.customerPhone || t.customerphone || t.customer_phone;
+            const n = t.customerName || t.customername || t.customer_name || 'Pelanggan';
+            return { customerPhone: p, customerName: n };
+        }).filter(t => {
+            const isRecent = recentPhones.has(t.customerPhone);
+            if (isRecent) console.log(`[Promotion DEBUG] Skipping ${t.customerPhone} - already in recent logs`);
+            return t.customerPhone && !isRecent;
+        });
+
+        console.log(`[Promotion DEBUG] Store: ${storeId}, SQL Targets: ${targets.length}, Recent Logs: ${recentLogs.length}, Final Targets: ${finalTargets.length}`);
 
         if (finalTargets.length === 0) {
+            console.log(`[Promotion DEBUG] No final targets for Store ${storeId}. Returning.`);
             return res.status(200).json({ success: true, message: 'Tidak ada target promosi baru saat ini' });
         }
 
         // Start background process
-        processBroadcast(storeId, finalTargets, type, store);
+        console.log(`[Promotion DEBUG] Calling processBroadcast for Store ${storeId}...`);
+        processBroadcast(storeId, finalTargets, type, store).catch(err => {
+            console.error(`[Promotion CRITICAL] processBroadcast Background Error:`, err);
+        });
 
         res.status(200).json({
             success: true,
@@ -124,15 +133,20 @@ const startBroadcast = async (req, res) => {
  * Background Broadcast Process (Anti-Ban Protocol)
  */
 async function processBroadcast(storeId, targets, type, store) {
-    const sock = getSocketByStoreId(storeId);
+    try {
+        console.log(`[Promotion DEBUG] processBroadcast STARTED for Store ${storeId}`);
+        const sock = getSocketByStoreId(storeId);
 
-    // TAHAP 43: Ensure virtual table exists for correct link context
-    const virtualTable = await getOrCreateVirtualTable(storeId);
-    console.log(`[Promotion] Starting Broadcast for Store ${storeId} to ${targets.length} targets. Sock Status: ${sock ? 'ONLINE' : 'OFFLINE'}`);
-    if (!sock) {
-        console.error(`[Promotion] CRITICAL: WhatsApp Socket not found for Store ${storeId}. Aborting broadcast.`);
-        return;
-    }
+        // TAHAP 43: Ensure virtual table exists for correct link context
+        console.log(`[Promotion DEBUG] Fetching Virtual Table for Store ${storeId}...`);
+        const virtualTable = await getOrCreateVirtualTable(storeId);
+        console.log(`[Promotion DEBUG] Virtual Table Found: ${virtualTable?.id}`);
+
+        console.log(`[Promotion] Starting Broadcast for Store ${storeId} to ${targets.length} targets. Sock Status: ${sock ? 'ONLINE' : 'OFFLINE'}`);
+        if (!sock) {
+            console.error(`[Promotion] CRITICAL: WhatsApp Socket not found for Store ${storeId}. Aborting broadcast.`);
+            return;
+        }
 
     const pwaUrl = process.env.PWA_URL || 'https://staging.quacxel.my.id';
 
@@ -197,6 +211,9 @@ async function processBroadcast(storeId, targets, type, store) {
     }
     
     console.log(`[Promotion] Broadcast for Store ${storeId} COMPLETED.`);
+    } catch (error) {
+        console.error(`[Promotion DEBUG] processBroadcast FATAL ERROR for Store ${storeId}:`, error);
+    }
 }
 
 /**
