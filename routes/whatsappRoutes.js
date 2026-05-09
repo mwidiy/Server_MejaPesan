@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { initWASession, sessions, disconnectWA, getWAStatus } = require('../services/whatsappService');
 const { verifyToken } = require('../middleware/authMiddleware');
+const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const { getPromotionStats, startBroadcast } = require('../controllers/promotionController');
 
@@ -81,6 +82,8 @@ router.post('/disconnect', verifyToken, async (req, res) => {
         } else {
             res.status(400).json({ success: false, message: 'Gagal memutuskan atau tidak ada sesi aktif.' });
         }
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
     }
 });
 
