@@ -183,6 +183,12 @@ const initWASession = async (storeId, io) => {
             for (const msg of m.messages) {
                 if (!msg.key.fromMe && msg.message) {
                     const from = msg.key.remoteJid;
+                    
+                    // TAHAP 42: FILTER GRUP - Hanya balas chat pribadi
+                    if (from.endsWith('@g.us')) {
+                        continue; 
+                    }
+
                     // TAHAP 38: Robust JID Extraction (Handle suffixes like :1 or @lid)
                     const fullId = from.split('@')[0];
                     const phone = fullId.split(':')[0]; // Remove device suffix
