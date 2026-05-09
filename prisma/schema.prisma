@@ -54,6 +54,19 @@ model Store {
   products                     Product[]
   owner                        User         @relation(fields: [ownerId], references: [id])
   withdrawals                  Withdrawal[]
+  promotionLogs                PromotionLog[]
+}
+
+model PromotionLog {
+  id            Int      @id @default(autoincrement())
+  storeId       Int
+  customerPhone String
+  type          String   // LOYAL, CHURNING, FEEDBACK
+  sentAt        DateTime @default(now())
+  store         Store    @relation(fields: [storeId], references: [id])
+
+  @@index([storeId])
+  @@index([customerPhone])
 }
 
 model Withdrawal {

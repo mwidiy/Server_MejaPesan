@@ -2,8 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { initWASession, sessions, disconnectWA, getWAStatus } = require('../services/whatsappService');
 const { verifyToken } = require('../middleware/authMiddleware');
-const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
+const { getPromotionStats, startBroadcast } = require('../controllers/promotionController');
 
 /**
  * TAHAP 40: Universal WhatsApp Init (Pairing Code Only)
@@ -81,9 +81,13 @@ router.post('/disconnect', verifyToken, async (req, res) => {
         } else {
             res.status(400).json({ success: false, message: 'Gagal memutuskan atau tidak ada sesi aktif.' });
         }
-    } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
     }
 });
+
+/**
+ * Promotion / Broadcast Routes
+ */
+router.get('/promotion/stats', verifyToken, getPromotionStats);
+router.post('/promotion/start', verifyToken, startBroadcast);
 
 module.exports = router;

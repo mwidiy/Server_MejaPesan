@@ -362,11 +362,17 @@ const getWAStatus = (storeId) => {
     return sock && sock.user ? 'connected' : 'disconnected';
 };
 
+const getSocketByStoreId = (storeId) => {
+    return sessions.get(parseInt(storeId));
+};
+
 module.exports = {
     initWASession,
     restartAllActiveSessions,
     sendWAMessage,
     disconnectWA,
     getWAStatus,
+    getSocketByStoreId,
+    getOrCreateVirtualTable,
     sessions
 };
