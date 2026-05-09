@@ -100,9 +100,11 @@ const startBroadcast = async (req, res) => {
             const n = t.customerName || t.customername || t.customer_name || 'Pelanggan';
             return { customerPhone: p, customerName: n };
         }).filter(t => {
-            const isRecent = recentPhones.has(t.customerPhone);
-            if (isRecent) console.log(`[Promotion DEBUG] Skipping ${t.customerPhone} - already in recent logs`);
-            return t.customerPhone && !isRecent;
+            // TAHAP DEBUG: Matikan filter sementara biar bisa tes berkali-kali
+            // const isRecent = recentPhones.has(t.customerPhone);
+            // if (isRecent) console.log(`[Promotion DEBUG] Skipping ${t.customerPhone} - already in recent logs`);
+            // return t.customerPhone && !isRecent;
+            return t.customerPhone; // Kirim ke semuanya tanpa filter
         });
 
         console.log(`[Promotion DEBUG] Store: ${storeId}, SQL Targets: ${targets.length}, Recent Logs: ${recentLogs.length}, Final Targets: ${finalTargets.length}`);
