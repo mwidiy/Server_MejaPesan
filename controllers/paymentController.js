@@ -2,6 +2,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const admin = require('../utils/firebase');
 const NodeCache = require('node-cache');
+const { sendWAMessage } = require('../services/whatsappService');
 
 const midtransClient = require('midtrans-client');
 const crypto = require('crypto');
@@ -330,14 +331,17 @@ const handleCallback = async (req, res) => {
                                     }
                                 } catch (fcmError) {
                                     console.error('FCM QRIS Notification Error:', fcmError.message);
-                                    if (fcmError?.errorInfo?.code === 'messaging/registration-token-not-registered') {
-                                        try {
-                                            const ownerId = storeData?.owner?.id;
-                                            if (ownerId) {
-                                                await prisma.user.update({ where: { id: ownerId }, data: { fcmToken: null } });
-                                                console.warn(`🗑️ Stale FCM token cleared for user ${ownerId}`);
-                                            }
-                                        } catch (cleanErr) { console.error('FCM token cleanup error:', cleanErr.message); }
+                                }
+
+                                // TAHAP WA: Send WhatsApp Confirmation for QRIS Paid
+                                if (_updatedOrder.customerPhone && _updatedOrder.storeId) {
+                                    try {
+                                        const waMessage = `✅ *Pembayaran Berhasil!*\n\nTerima kasih kak *${_updatedOrder.customerName}*, pembayaran Rp ${_updatedOrder.totalAmount?.toLocaleString('id-ID')} sudah kami terima.\n\n🆔 Kode: *${_orderTC}*\n\nPesanan kamu sekarang sedang diproses. Mohon ditunggu ya kak! 🍳`;
+                                        const fullJid = `${_updatedOrder.customerPhone}@${_updatedOrder.customerPhoneJidType || 's.whatsapp.net'}`;
+                                        await sendWAMessage(_updatedOrder.storeId, fullJid, waMessage);
+                                        console.log(`[WA] Sent Payment Confirmation to ${_updatedOrder.customerPhone}`);
+                                    } catch (waErr) {
+                                        console.error('[WA] Failed to send payment confirmation:', waErr.message);
                                     }
                                 }
                             }
@@ -451,6 +455,18 @@ const handleCallback = async (req, res) => {
                                     }
                                 } catch (fcmError) {
                                     console.error('FCM Midtrans Notification Error:', fcmError.message);
+                                }
+
+                                // TAHAP WA: Send WhatsApp Confirmation for Midtrans Paid
+                                if (_updatedOrderMT.customerPhone && _updatedOrderMT.storeId) {
+                                    try {
+                                        const waMessage = `✅ *Pembayaran Berhasil (QRIS)!*\n\nTerima kasih kak *${_updatedOrderMT.customerName}*, pembayaran Rp ${_updatedOrderMT.totalAmount?.toLocaleString('id-ID')} via Midtrans sudah kami terima.\n\n🆔 Kode: *${_orderTCMT}*\n\nPesanan kamu sekarang sedang diproses. Mohon ditunggu ya kak! 🍳`;
+                                        const fullJid = `${_updatedOrderMT.customerPhone}@${_updatedOrderMT.customerPhoneJidType || 's.whatsapp.net'}`;
+                                        await sendWAMessage(_updatedOrderMT.storeId, fullJid, waMessage);
+                                        console.log(`[WA] Sent Midtrans Payment Confirmation to ${_updatedOrderMT.customerPhone}`);
+                                    } catch (waErr) {
+                                        console.error('[WA] Failed to send Midtrans confirmation:', waErr.message);
+                                    }
                                 }
                             }
                         } catch (bgErr) {
