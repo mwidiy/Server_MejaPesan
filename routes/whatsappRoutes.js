@@ -33,8 +33,9 @@ const handleInit = async (req, res) => {
             return res.json({ success: true, message: 'WhatsApp sudah terhubung.', status: 'connected' });
         }
 
+        const { waType } = req.body;
         // initWASession now automatically fetches number and requests pairing code
-        await initWASession(storeId, req.app.get('io'));
+        await initWASession(storeId, req.app.get('io'), waType || 'standard');
         res.json({ success: true, message: 'Proses pairing dimulai. Silakan cek kode di aplikasi.' });
     } catch (err) {
         console.error('[WA Route] Error:', err);

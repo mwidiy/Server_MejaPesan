@@ -60,7 +60,15 @@ const getOrCreateVirtualTable = async (storeId) => {
 /**
  * Initialize a WhatsApp session for a specific store (Pairing Code Only)
  */
-const initWASession = async (storeId, io) => {
+const initWASession = async (storeId, io, waType = 'standard') => {
+    // TAHAP 40: Optimized Browser Identity based on account type
+    // Standard is usually fine with Windows, but Business is more stable with macOS/Desktop identity
+    const browserIdentity = waType?.toLowerCase() === 'business' 
+        ? ["macOS", "Desktop", "110.0.5481.178"] 
+        : ["Windows", "Chrome", "110.0.5481.178"];
+
+    console.log(`[WA] Initializing session for store ${storeId} (Type: ${waType})...`);
+
     // TAHAP 40: Fetch phone number from DB
     const store = await prisma.store.findUnique({
         where: { id: parseInt(storeId) },
@@ -105,13 +113,12 @@ const initWASession = async (storeId, io) => {
             keys: makeCacheableSignalKeyStore(state.keys, logger),
         },
         printQRInTerminal: false,
-        // TAHAP 40: Standard Windows Chrome (Most trusted by WhatsApp)
-        browser: ["Windows", "Chrome", "110.0.5481.178"],
+        browser: browserIdentity,
         syncFullHistory: false, 
         markOnlineOnConnect: true,
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 0,
-        qrTimeout: 40000 // Increase QR timeout to prevent loops
+        qrTimeout: 40000 
     });
 
     // TAHAP 40: Flag to prevent multiple pairing code requests in one session
