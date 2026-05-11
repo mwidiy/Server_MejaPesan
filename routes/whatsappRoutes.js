@@ -29,8 +29,14 @@ const handleInit = async (req, res) => {
         }
 
         const existingSock = sessions.get(parseInt(storeId));
-        if (existingSock && existingSock.user) {
-            return res.json({ success: true, message: 'WhatsApp sudah terhubung.', status: 'connected' });
+        if (existingSock) {
+            if (existingSock.user) {
+                return res.json({ success: true, message: 'WhatsApp sudah terhubung.', status: 'connected' });
+            }
+            // TAHAP 40: Clean up old non-connected socket
+            console.log(`[WA] Closing existing non-connected socket for store ${storeId}`);
+            try { existingSock.end(); } catch(e) {}
+            sessions.delete(parseInt(storeId));
         }
 
         const { waType } = req.body;

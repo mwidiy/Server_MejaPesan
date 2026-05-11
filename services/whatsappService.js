@@ -64,8 +64,8 @@ const initWASession = async (storeId, io, waType = 'standard') => {
     // TAHAP 40: Optimized Browser Identity based on account type
     // Standard is usually fine with Windows, but Business is more stable with macOS/Desktop identity
     const browserIdentity = waType?.toLowerCase() === 'business' 
-        ? ["macOS", "Desktop", "110.0.5481.178"] 
-        : ["Windows", "Chrome", "110.0.5481.178"];
+        ? ["Mac OS", "Chrome", "121.0.6167.184"] 
+        : ["Windows", "Chrome", "121.0.6167.184"];
 
     console.log(`[WA] Initializing session for store ${storeId} (Type: ${waType})...`);
 
@@ -161,15 +161,23 @@ const initWASession = async (storeId, io, waType = 'standard') => {
         if (connection === 'close') {
             const statusCode = lastDisconnect.error?.output?.statusCode || lastDisconnect.error?.statusCode;
             const errorMsg = lastDisconnect.error?.message || '';
-            const isLogout = statusCode === DisconnectReason.loggedOut;
+            const isLogout = statusCode === DisconnectReason.loggedOut || statusCode === 401;
+            const isConnectionFailure = statusCode === DisconnectReason.connectionLost || statusCode === DisconnectReason.connectionClosed;
             
             console.log(`[WA] Connection closed for store ${storeId}. Reason: ${statusCode}. Msg: ${errorMsg}`);
 
-            if (isLogout) {
-                console.log(`[WA] Explicit logout for store ${storeId}. Cleaning up session...`);
+            // TAHAP 40: Clean up session on logout OR critical connection failure during pairing
+            if (isLogout || isConnectionFailure) {
+                console.log(`[WA] Cleaning up session directory for store ${storeId} due to critical failure...`);
                 if (io) io.to(`store_${storeId}`).emit('wa_status', { status: 'disconnected' });
+                
                 if (fs.existsSync(sessionDir)) {
-                    try { rimraf.sync(sessionDir); } catch(e) {}
+                    try { 
+                        // Use synchronous rimraf to ensure it's gone before next init
+                        require('fs').rmSync(sessionDir, { recursive: true, force: true }); 
+                    } catch(e) {
+                        console.error(`[WA] Failed to delete session dir: ${e.message}`);
+                    }
                 }
                 sessions.delete(storeId);
 
