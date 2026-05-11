@@ -95,8 +95,7 @@ const initWASession = async (storeId, io) => {
     }
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-    // TAHAP 42: Forced Stable Version (Prevent 428 Error)
-    const version = [2, 3000, 1015901307]; 
+    const { version } = await fetchLatestBaileysVersion();
 
     const sock = makeWASocket({
         version,
@@ -106,8 +105,8 @@ const initWASession = async (storeId, io) => {
             keys: makeCacheableSignalKeyStore(state.keys, logger),
         },
         printQRInTerminal: false,
-        // TAHAP 41: Linux Chrome (Better compatibility for WA Business)
-        browser: ["Ubuntu", "Chrome", "20.0.04"],
+        // TAHAP 40: Standard Windows Chrome (Most trusted by WhatsApp)
+        browser: ["Windows", "Chrome", "110.0.5481.178"],
         syncFullHistory: false, 
         markOnlineOnConnect: true,
         connectTimeoutMs: 60000,
@@ -132,7 +131,6 @@ const initWASession = async (storeId, io) => {
             try {
                 // Increased delay for stability
                 await new Promise(resolve => setTimeout(resolve, 3000));
-                console.log(`[WA] Sending Pairing Request to: ${phoneNumber}`);
                 const code = await sock.requestPairingCode(phoneNumber);
                 console.log(`[WA] Pairing Code for store ${storeId}: ${code}`);
                 if (io) io.to(`store_${storeId}`).emit('wa_pairing_code', { code });
