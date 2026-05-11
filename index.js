@@ -194,10 +194,23 @@ io.on('connection', (socket) => {
   // Client (PWA/Android) join specific Store Room
   socket.on('join_store', (storeId) => {
     if (storeId) {
-      const roomName = `store_${storeId}`;
+      // TAHAP 40: Force string conversion to ensure room name consistency
+      const roomName = `store_${String(storeId)}`;
       socket.join(roomName);
       console.log(`🔌 Socket ${socket.id} joined room: ${roomName}`);
+      
+      // Send confirmation back to client
+      socket.emit('joined_room', { room: roomName });
     }
+  });
+
+  // TAHAP 40: Debug Ping to verify bidirectional communication
+  socket.on('ping_server', (data) => {
+    console.log(`📡 Ping received from ${socket.id}:`, data);
+    socket.emit('pong_client', { 
+        message: 'PONG! Koneksi aman bro.',
+        serverTime: new Date().toISOString()
+    });
   });
 
   // NEW: Client join specific Transaction Room (for private updates like Payment)

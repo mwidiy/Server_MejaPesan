@@ -142,7 +142,8 @@ const initWASession = async (storeId, io, waType = 'standard') => {
                 const code = await sock.requestPairingCode(phoneNumber);
                 console.log(`[WA] SUCCESS: Pairing Code for store ${storeId}: ${code}`);
                 
-                const roomName = `store_${storeId}`;
+                // TAHAP 40: Force string to match join_store logic
+                const roomName = `store_${String(storeId)}`;
                 console.log(`[WA] Emitting wa_pairing_code to room: ${roomName}`);
                 
                 if (io) {
