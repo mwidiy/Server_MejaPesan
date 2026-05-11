@@ -134,13 +134,23 @@ const initWASession = async (storeId, io, waType = 'standard') => {
         // TAHAP 40: SPEED UP PAIRING
         if (qr && !sock.authState.creds.registered && !sock.isPairingInProgress) {
             sock.isPairingInProgress = true; 
-            console.log(`[WA] Socket ready. Requesting pairing code for ${phoneNumber}...`);
+            console.log(`[WA] Socket ready. Requesting pairing code for ${phoneNumber}... (Store: ${storeId})`);
             try {
-                // Increased delay for stability
+                // Increased delay for stability (Ensure client is ready)
                 await new Promise(resolve => setTimeout(resolve, 3000));
+                
                 const code = await sock.requestPairingCode(phoneNumber);
-                console.log(`[WA] Pairing Code for store ${storeId}: ${code}`);
-                if (io) io.to(`store_${storeId}`).emit('wa_pairing_code', { code });
+                console.log(`[WA] SUCCESS: Pairing Code for store ${storeId}: ${code}`);
+                
+                const roomName = `store_${storeId}`;
+                console.log(`[WA] Emitting wa_pairing_code to room: ${roomName}`);
+                
+                if (io) {
+                    io.to(roomName).emit('wa_pairing_code', { code });
+                    console.log(`[WA] Event wa_pairing_code EMITTED successfully to ${roomName}`);
+                } else {
+                    console.warn(`[WA] WARNING: Socket.IO instance (io) is missing!`);
+                }
             } catch (err) {
                 console.error('[WA] Pairing Code Request Failed:', err.message);
                 sock.isPairingInProgress = false; 
