@@ -28,14 +28,18 @@ const handleInit = async (req, res) => {
             });
         }
 
-        const existingSock = sessions.get(parseInt(storeId));
+        const numericStoreId = parseInt(storeId);
+        const existingSock = sessions.get(numericStoreId);
         if (existingSock && existingSock.user) {
             return res.json({ success: true, message: 'WhatsApp sudah terhubung.', status: 'connected' });
         }
 
         const { waType } = req.body;
+        // TAHAP 41: Robust IO handling (fallback to global if req.app.get is empty)
+        const io = req.app.get('io') || global.ioInstance;
+        
         // initWASession now automatically fetches number and requests pairing code
-        await initWASession(storeId, req.app.get('io'), waType || 'standard');
+        await initWASession(storeId, io, waType || 'standard');
         res.json({ success: true, message: 'Proses pairing dimulai. Silakan cek kode di aplikasi.' });
     } catch (err) {
         console.error('[WA Route] Error:', err);
