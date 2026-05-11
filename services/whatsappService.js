@@ -95,7 +95,8 @@ const initWASession = async (storeId, io) => {
     }
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-    const { version } = await fetchLatestBaileysVersion();
+    // TAHAP 42: Forced Stable Version (Prevent 428 Error)
+    const version = [2, 3000, 1015901307]; 
 
     const sock = makeWASocket({
         version,
