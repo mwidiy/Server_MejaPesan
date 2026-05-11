@@ -62,32 +62,12 @@ const getOrCreateVirtualTable = async (storeId) => {
  */
 const initWASession = async (storeId, io, waType = 'standard') => {
     // TAHAP 40: Optimized Browser Identity based on account type
+    // Standard is usually fine with Windows, but Business is more stable with macOS/Desktop identity
     const browserIdentity = waType?.toLowerCase() === 'business' 
         ? ["macOS", "Desktop", "110.0.5481.178"] 
         : ["Windows", "Chrome", "110.0.5481.178"];
 
     console.log(`[WA] Initializing session for store ${storeId} (Type: ${waType})...`);
-
-    // --- TAHAP 41: CLEANUP PREVIOUS SESSION (Resilient Version) ---
-    const numericStoreId = parseInt(storeId);
-    const existingSock = sessions.get(numericStoreId);
-    if (existingSock) {
-        console.log(`[WA] Cleaning up existing session for store ${numericStoreId}...`);
-        try {
-            // Remove listeners first to stop events from firing during cleanup
-            if (existingSock.ev && typeof existingSock.ev.removeAllListeners === 'function') {
-                existingSock.ev.removeAllListeners('connection.update');
-                existingSock.ev.removeAllListeners('creds.update');
-            }
-            // Just end the connection, don't logout (logout can be flaky if not connected)
-            if (existingSock && typeof existingSock.end === 'function') {
-                existingSock.end(undefined); 
-            }
-        } catch (e) {
-            console.log(`[WA] Non-fatal cleanup notice: ${e.message}`);
-        }
-        sessions.delete(numericStoreId);
-    }
 
     // TAHAP 40: Fetch phone number from DB
     const store = await prisma.store.findUnique({
@@ -108,6 +88,14 @@ const initWASession = async (storeId, io, waType = 'standard') => {
     }
     // If it starts with 62 but was entered as +62, the replace(/\D/g) already handled it.
 
+    // Prevent duplicate initialization
+    const existingSock = sessions.get(storeId);
+    if (existingSock) {
+        if (existingSock.user) {
+            if (io) io.to(`store_${storeId}`).emit('wa_status', { status: 'connected' });
+            return existingSock;
+        }
+    }
 
     const sessionDir = path.join(__dirname, '../sessions', `store_${storeId}`);
     if (!fs.existsSync(sessionDir)) {
@@ -136,7 +124,7 @@ const initWASession = async (storeId, io, waType = 'standard') => {
     // TAHAP 40: Flag to prevent multiple pairing code requests in one session
     sock.isPairingInProgress = false;
 
-    sessions.set(parseInt(storeId), sock);
+    sessions.set(storeId, sock);
 
     sock.ev.on('creds.update', saveCreds);
 
@@ -152,11 +140,7 @@ const initWASession = async (storeId, io, waType = 'standard') => {
                 await new Promise(resolve => setTimeout(resolve, 3000));
                 const code = await sock.requestPairingCode(phoneNumber);
                 console.log(`[WA] Pairing Code for store ${storeId}: ${code}`);
-                if (io) {
-                    const room = `store_${storeId}`;
-                    console.log(`[SOCKET] Emitting wa_pairing_code to room: ${room}`);
-                    io.to(room).emit('wa_pairing_code', { code });
-                }
+                if (io) io.to(`store_${storeId}`).emit('wa_pairing_code', { code });
             } catch (err) {
                 console.error('[WA] Pairing Code Request Failed:', err.message);
                 sock.isPairingInProgress = false; 
