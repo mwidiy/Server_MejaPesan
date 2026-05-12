@@ -39,8 +39,24 @@ const generateShortLink = async (originalUrl) => {
         return code;
     } catch (err) {
         console.error('[Shortener] Fatal Error:', err.message);
-        if (err.code === 'P2021') {
-            console.error('[Shortener] Database table missing! Please run: npx prisma db push');
+        
+        // --- AUTO-REPAIR LOGIC: If table is missing, try to create it once ---
+        if (err.code === 'P2021' || err.message.includes('does not exist')) {
+            console.log('[Shortener] Attempting to create missing table short_links...');
+            try {
+                await prisma.$executeRawUnsafe(`
+                    CREATE TABLE IF NOT EXISTS "short_links" (
+                        "code" TEXT NOT NULL,
+                        "originalUrl" TEXT NOT NULL,
+                        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        CONSTRAINT "short_links_pkey" PRIMARY KEY ("code")
+                    );
+                `);
+                console.log('[Shortener] Table short_links created successfully. Retrying generation...');
+                return generateShortLink(originalUrl); // Retry once
+            } catch (createErr) {
+                console.error('[Shortener] Auto-repair failed:', createErr.message);
+            }
         }
         return null;
     }
