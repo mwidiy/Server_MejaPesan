@@ -196,3 +196,9 @@ model SystemConfig {
   value     String
   updatedAt DateTime @updatedAt
 }
+
+model ShortLink {
+  code        String   @id
+  originalUrl String   @db.Text
+  createdAt   DateTime @default(now())
+}

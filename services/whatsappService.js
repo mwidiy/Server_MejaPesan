@@ -15,6 +15,7 @@ const rimraf = require('rimraf');
 const crypto = require('crypto');
 const { signData } = require('../utils/security');
 const { getGeminiResponse } = require('../utils/aiHelper');
+const { generateShortLink } = require('../utils/urlShortener');
 
 const logger = pino({ level: 'info' });
 
@@ -274,7 +275,12 @@ const initWASession = async (storeId, io, waType = 'standard') => {
                             }
 
                             // TAHAP STATIC: Default "Magical Link" logic (If AI fails or is disabled)
-                            const welcomeMsg = `Halo kak *${pushName}*! Terima kasih sudah menghubungi kami. \n\nSilakan klik link di bawah ini untuk melihat menu dan langsung memesan ya kak. Nomor WhatsApp kakak sudah terhubung otomatis: \n\n${magicalLink}`;
+                            const shortCode = await generateShortLink(magicalLink);
+                            const finalLink = shortCode 
+                                ? `${process.env.API_PUBLIC_URL || 'http://localhost:3000'}/go/${shortCode}`
+                                : magicalLink;
+
+                            const welcomeMsg = `Halo kak *${pushName}*! Terima kasih sudah menghubungi kami. \n\nSilakan klik link di bawah ini untuk melihat menu dan langsung memesan ya kak. Nomor WhatsApp kakak sudah terhubung otomatis: \n\n${finalLink}`;
                             
                             await sock.sendMessage(from, { text: welcomeMsg }, { linkPreview: null });
                             console.log(`[WA DEBUG] Sent Magical Link to ${from} (Type: ${jidType})`);

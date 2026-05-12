@@ -16,6 +16,7 @@ const rateLimit = require('express-rate-limit'); // NEW: Import Rate Limiter
 const productRoutes = require('./routes/productRoutes');
 const bannerRoutes = require('./routes/bannerRoutes');
 const whatsappService = require('./services/whatsappService'); // NEW: WA Service
+const { getOriginalUrl } = require('./utils/urlShortener'); // NEW: URL Shortener
 
 const app = express();
 // NEW: Trust first proxy to allow express-rate-limit to extract real client IP 
@@ -232,6 +233,18 @@ app.get('/favicon.ico', (req, res) => res.status(204).end());
 // --- ROUTE UTAMA (CEK SERVER) ---
 app.get('/', (req, res) => {
   res.send('Server Backend Kasir Siap! 🚀 Silakan akses /api/products');
+});
+
+// --- URL SHORTENER REDIRECTOR ---
+app.get('/go/:code', async (req, res) => {
+    const { code } = req.params;
+    const originalUrl = await getOriginalUrl(code);
+    
+    if (originalUrl) {
+        return res.redirect(originalUrl);
+    } else {
+        return res.status(404).send('Link tidak valid atau sudah kadaluarsa.');
+    }
 });
 
 // --- TAHAP 64: SMART PING TRACKER (KOYEB COLD START PREVENTER) ---

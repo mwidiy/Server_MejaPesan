@@ -100,4 +100,19 @@ router.post('/disconnect', verifyToken, async (req, res) => {
 router.get('/promotion/stats', verifyToken, getPromotionStats);
 router.post('/promotion/start', verifyToken, startBroadcast);
 
+/**
+ * WhatsApp Blast (Segmentation)
+ */
+const { getSegments, sendBlast } = require('../controllers/whatsappBlastController');
+
+router.get('/blast/segments', verifyToken, (req, res) => {
+    req.params.storeId = req.storeId;
+    getSegments(req, res);
+});
+
+router.post('/blast/send', verifyToken, (req, res) => {
+    req.body.storeId = req.storeId;
+    sendBlast(req, res);
+});
+
 module.exports = router;

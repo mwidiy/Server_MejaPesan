@@ -2,6 +2,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const { getSocketByStoreId, getOrCreateVirtualTable } = require('../services/whatsappService');
 const { signData } = require('../utils/security');
+const { generateShortLink } = require('../utils/urlShortener');
 
 /**
  * Get Promotion Stats for the Kasir App
@@ -17,7 +18,7 @@ const getPromotionStats = async (req, res) => {
         const loyalCustomers = await prisma.$queryRaw`
             SELECT "customerPhone", "customerName", COUNT(id) as count
             FROM "Order"
-            WHERE "storeId" = ${storeId} AND "createdAt" >= ${thirtyDaysAgo}
+            WHERE "storeId" = ${storeId} AND "createdAt" >= ${thirtyDaysAgo} AND "customerPhone" IS NOT NULL
             GROUP BY "customerPhone", "customerName"
             HAVING COUNT(id) >= 3
         `;
@@ -27,7 +28,7 @@ const getPromotionStats = async (req, res) => {
         const churningCustomers = await prisma.$queryRaw`
             SELECT "customerPhone", "customerName", MAX("createdAt") as lastOrder
             FROM "Order"
-            WHERE "storeId" = ${storeId}
+            WHERE "storeId" = ${storeId} AND "customerPhone" IS NOT NULL
             GROUP BY "customerPhone", "customerName"
             HAVING MAX("createdAt") <= ${fourteenDaysAgo} AND MAX("createdAt") >= ${sixtyDaysAgo}
         `;
@@ -71,7 +72,7 @@ const startBroadcast = async (req, res) => {
             targets = await prisma.$queryRaw`
                 SELECT "customerPhone", "customerName"
                 FROM "Order"
-                WHERE "storeId" = ${storeId} AND "createdAt" >= ${thirtyDaysAgo}
+                WHERE "storeId" = ${storeId} AND "createdAt" >= ${thirtyDaysAgo} AND "customerPhone" IS NOT NULL
                 GROUP BY "customerPhone", "customerName"
                 HAVING COUNT(id) >= 3
             `;
@@ -81,7 +82,7 @@ const startBroadcast = async (req, res) => {
             targets = await prisma.$queryRaw`
                 SELECT "customerPhone", "customerName"
                 FROM "Order"
-                WHERE "storeId" = ${storeId}
+                WHERE "storeId" = ${storeId} AND "customerPhone" IS NOT NULL
                 GROUP BY "customerPhone", "customerName"
                 HAVING MAX("createdAt") <= ${fourteenDaysAgo} AND MAX("createdAt") >= ${sixtyDaysAgo}
             `;
@@ -179,12 +180,18 @@ async function processBroadcast(storeId, targets, type, store) {
         const sig = signData(`${String(storeId)}:${String(virtualTable.id)}:${String(phone)}:${String(jidType)}`);
         const magicalLink = `${pwaUrl}/?s=${storeId}&t=${virtualTable.id}&p=${phone}&jt=${jidType}&n=${encodeURIComponent(rawName)}&sig=${sig}&src=promo`;
         
+        // 2b. SHORTEN THE LINK (Anti-Phishing)
+        const shortCode = await generateShortLink(magicalLink);
+        const finalLink = shortCode 
+            ? `${process.env.API_PUBLIC_URL || 'http://localhost:3000'}/go/${shortCode}`
+            : magicalLink;
+
         // 3. Template Selection
         let message = "";
         if (type === 'LOYAL') {
-            message = `${greeting} Kak *${rawName}*! Terima kasih banyak sudah jadi pelanggan setia *${store.name}*. Kami sangat menghargai kehadiran Kakak nih. Mampir lagi yuk hari ini, menu andalan kami siap melayani: \n\n${magicalLink}`;
+            message = `${greeting} Kak *${rawName}*! Terima kasih banyak sudah jadi pelanggan setia *${store.name}*. Kami sangat menghargai kehadiran Kakak nih. Mampir lagi yuk hari ini, menu andalan kami siap melayani: \n\n${finalLink}`;
         } else {
-            message = `${greeting} Kak *${rawName}*! *${store.name}* kangen nih, udah lama Kakak nggak mampir. Yuk cek menu terbaru kita atau pesan lagi lewat link ini ya: \n\n${magicalLink}`;
+            message = `${greeting} Kak *${rawName}*! *${store.name}* kangen nih, udah lama Kakak nggak mampir. Yuk cek menu terbaru kita atau pesan lagi lewat link ini ya: \n\n${finalLink}`;
         }
 
         try {
