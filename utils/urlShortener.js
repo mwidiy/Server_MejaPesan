@@ -38,7 +38,10 @@ const generateShortLink = async (originalUrl) => {
 
         return code;
     } catch (err) {
-        console.error('[Shortener] Error:', err);
+        console.error('[Shortener] Fatal Error:', err.message);
+        if (err.code === 'P2021') {
+            console.error('[Shortener] Database table missing! Please run: npx prisma db push');
+        }
         return null;
     }
 };

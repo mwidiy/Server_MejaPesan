@@ -201,4 +201,6 @@ model ShortLink {
   code        String   @id
   originalUrl String   @db.Text
   createdAt   DateTime @default(now())
+
+  @@map("short_links")
 }
