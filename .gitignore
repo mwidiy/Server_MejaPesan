@@ -6,6 +6,5 @@ dist
 db_transition_plan.md
 github_transition_plan.md
 .env.staging
-public/ar-assets/
 rclone_tmp/
 scratch/
