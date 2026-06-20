@@ -80,7 +80,9 @@ const createOrder = async (req, res) => {
             paymentStatus,
             customerPhone,
             customerPhoneSig,
-            customerPhoneJidType
+            customerPhoneJidType,
+            shippingZoneId,
+            shippingFee
         } = req.body;
 
         // 1. Validasi Input Dasar
@@ -306,9 +308,11 @@ const createOrder = async (req, res) => {
                 customerName,
                 // Don't use scalar tableId, use relation below
                 orderType: finalOrderType,
-                totalAmount: calculatedTotal,
+                totalAmount: calculatedTotal + (shippingFee ? parseInt(shippingFee) : 0),
                 note: note || "",
                 deliveryAddress: deliveryAddress || "",
+                shippingZoneId: shippingZoneId ? parseInt(shippingZoneId) : null,
+                shippingFee: shippingFee ? parseInt(shippingFee) : 0,
                 status: initialStatus,
                 paymentMethod: paymentMethod || null,
                 paymentStatus: paymentStatus || 'Unpaid',

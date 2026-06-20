@@ -119,6 +119,16 @@ const updateStore = async (req, res) => {
         const storeIdInt = parseInt(req.storeId);
         if (isNaN(storeIdInt)) return res.status(400).json({ error: 'User tidak memiliki akses Toko' });
 
+        // Validasi khusus untuk isDeliveryActive
+        if (sanitizedData.isDeliveryActive === true) {
+            const zonesCount = await prisma.shippingZone.count({
+                where: { storeId: storeIdInt, isActive: true }
+            });
+            if (zonesCount === 0) {
+                return res.status(400).json({ error: "Tidak dapat mengaktifkan pengiriman. Harap tambah zona pengiriman terlebih dahulu." });
+            }
+        }
+
         // Update Store
         const updated = await prisma.store.update({
             where: { id: storeIdInt },

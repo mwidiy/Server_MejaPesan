@@ -55,6 +55,7 @@ model Store {
   owner                        User         @relation(fields: [ownerId], references: [id])
   withdrawals                  Withdrawal[]
   promotionLogs                PromotionLog[]
+  shippingZones                ShippingZone[]
 }
 
 model PromotionLog {
@@ -89,6 +90,16 @@ model Location {
   storeId Int
   store   Store   @relation(fields: [storeId], references: [id])
   tables  Table[]
+}
+
+model ShippingZone {
+  id        Int      @id @default(autoincrement())
+  name      String
+  cost      Int
+  isActive  Boolean  @default(true)
+  storeId   Int
+  store     Store    @relation(fields: [storeId], references: [id])
+  orders    Order[]
 }
 
 model Table {
@@ -162,6 +173,11 @@ model Order {
   cancellationReason String?
   cancellationStatus String?
   refundStatus       String?
+  
+  shippingZoneId     Int?
+  shippingZone       ShippingZone? @relation(fields: [shippingZoneId], references: [id])
+  shippingFee        Int?          @default(0)
+
   storeId            Int
   store              Store       @relation(fields: [storeId], references: [id])
   table              Table?      @relation(fields: [tableId], references: [id])
