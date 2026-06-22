@@ -16,6 +16,7 @@ const getAllZones = async (req, res) => {
         });
         res.json(zones);
     } catch (error) {
+        console.error("Get All Zones Error:", error);
         res.status(500).json({ message: error.message });
     }
 };
@@ -36,6 +37,7 @@ const createZone = async (req, res) => {
         });
         res.json(newZone);
     } catch (error) {
+        console.error("Create Zone Error:", error);
         res.status(500).json({ message: error.message });
     }
 };
@@ -54,6 +56,7 @@ const updateZone = async (req, res) => {
         });
         res.json(updatedZone);
     } catch (error) {
+        console.error("Update Zone Error:", error);
         res.status(500).json({ message: error.message });
     }
 };
@@ -85,6 +88,7 @@ const deleteZone = async (req, res) => {
 
         res.json(deletedZone);
     } catch (error) {
+        console.error("Delete Zone Error:", error);
         res.status(500).json({ message: error.message });
     }
 };
