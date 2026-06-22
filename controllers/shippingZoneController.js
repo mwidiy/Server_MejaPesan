@@ -18,7 +18,10 @@ const getAllZones = async (req, res) => {
             where: whereClause,
             orderBy: { id: 'asc' }
         });
-        res.json({ success: true, data: zones });
+        
+        // Map cost -> fee untuk KASIR App
+        const formattedZones = zones.map(z => ({ ...z, fee: z.cost }));
+        res.json({ success: true, data: formattedZones });
     } catch (error) {
         console.error("Get All Zones Error:", error);
         res.status(500).json({ message: error.message });
@@ -27,20 +30,22 @@ const getAllZones = async (req, res) => {
 
 const createZone = async (req, res) => {
     try {
-        const { name, cost, isActive } = req.body;
+        const { name, cost, fee, isActive } = req.body;
         const storeId = identifyStore(req) || req.body.storeId;
         
         if (!storeId) return res.status(400).json({ success: false, error: "storeId is required" });
 
+        const finalCost = fee !== undefined ? fee : cost;
+
         const newZone = await prisma.shippingZone.create({
             data: {
                 name,
-                cost: parseInt(cost),
+                cost: parseInt(finalCost),
                 isActive: isActive !== undefined ? isActive : true,
                 store: { connect: { id: parseInt(storeId) } }
             }
         });
-        res.json({ success: true, data: newZone });
+        res.json({ success: true, data: { ...newZone, fee: newZone.cost } });
     } catch (error) {
         console.error("Create Zone Error:", error);
         res.status(500).json({ message: error.message });
@@ -50,16 +55,19 @@ const createZone = async (req, res) => {
 const updateZone = async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, cost, isActive } = req.body;
+        const { name, cost, fee, isActive } = req.body;
+        
+        const finalCost = fee !== undefined ? fee : cost;
+
         const updatedZone = await prisma.shippingZone.update({
             where: { id: parseInt(id) },
             data: {
                 name,
-                cost: cost !== undefined ? parseInt(cost) : undefined,
+                cost: finalCost !== undefined ? parseInt(finalCost) : undefined,
                 isActive
             }
         });
-        res.json({ success: true, data: updatedZone });
+        res.json({ success: true, data: { ...updatedZone, fee: updatedZone.cost } });
     } catch (error) {
         console.error("Update Zone Error:", error);
         res.status(500).json({ message: error.message });
@@ -91,7 +99,7 @@ const deleteZone = async (req, res) => {
             });
         }
 
-        res.json({ success: true, data: deletedZone });
+        res.json({ success: true, data: { ...deletedZone, fee: deletedZone.cost } });
     } catch (error) {
         console.error("Delete Zone Error:", error);
         res.status(500).json({ message: error.message });
