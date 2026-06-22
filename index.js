@@ -286,6 +286,7 @@ app.use('/api/payments', require('./routes/paymentRoutes')); // ALIAS/WEBHOOK FI
 app.use('/api/withdraw', require('./routes/withdrawalRoutes')); // NEW: Withdrawal
 app.use('/api/system-config', require('./routes/systemConfigRoutes')); // NEW: Super Admin Config
 app.use('/api/whatsapp', require('./routes/whatsappRoutes')); // NEW: WA Bot Routes
+app.use('/api/shipping-zones', require('./routes/shippingZoneRoutes')); // NEW: Shipping Zones
 
 // --- PRIORITAS 5: GLOBAL ERROR HANDLER (PENUTUP AIB) ---
 // Middleware ini ditaruh PALING BAWAH setelah semua Route.

@@ -1,20 +1,24 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
+const { identifyStore } = require('../middleware/authMiddleware');
 
 const getAllZones = async (req, res) => {
     try {
         const { storeId } = req.query; // PWA butuh get berdasarkan store
         
         let whereClause = {};
-        if (storeId) {
-            whereClause.storeId = parseInt(storeId);
+        const authStoreId = identifyStore(req);
+        const targetStoreId = storeId || authStoreId;
+        
+        if (targetStoreId) {
+            whereClause.storeId = parseInt(targetStoreId);
         }
 
         const zones = await prisma.shippingZone.findMany({
             where: whereClause,
             orderBy: { id: 'asc' }
         });
-        res.json(zones);
+        res.json({ success: true, data: zones });
     } catch (error) {
         console.error("Get All Zones Error:", error);
         res.status(500).json({ message: error.message });
@@ -23,9 +27,10 @@ const getAllZones = async (req, res) => {
 
 const createZone = async (req, res) => {
     try {
-        const { name, cost, isActive, storeId } = req.body;
+        const { name, cost, isActive } = req.body;
+        const storeId = identifyStore(req) || req.body.storeId;
         
-        if (!storeId) return res.status(400).json({ message: "storeId is required" });
+        if (!storeId) return res.status(400).json({ success: false, error: "storeId is required" });
 
         const newZone = await prisma.shippingZone.create({
             data: {
@@ -35,7 +40,7 @@ const createZone = async (req, res) => {
                 storeId: parseInt(storeId)
             }
         });
-        res.json(newZone);
+        res.json({ success: true, data: newZone });
     } catch (error) {
         console.error("Create Zone Error:", error);
         res.status(500).json({ message: error.message });
@@ -54,7 +59,7 @@ const updateZone = async (req, res) => {
                 isActive
             }
         });
-        res.json(updatedZone);
+        res.json({ success: true, data: updatedZone });
     } catch (error) {
         console.error("Update Zone Error:", error);
         res.status(500).json({ message: error.message });
@@ -86,7 +91,7 @@ const deleteZone = async (req, res) => {
             });
         }
 
-        res.json(deletedZone);
+        res.json({ success: true, data: deletedZone });
     } catch (error) {
         console.error("Delete Zone Error:", error);
         res.status(500).json({ message: error.message });
