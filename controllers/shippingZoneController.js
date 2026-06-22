@@ -37,7 +37,7 @@ const createZone = async (req, res) => {
                 name,
                 cost: parseInt(cost),
                 isActive: isActive !== undefined ? isActive : true,
-                storeId: parseInt(storeId)
+                store: { connect: { id: parseInt(storeId) } }
             }
         });
         res.json({ success: true, data: newZone });
