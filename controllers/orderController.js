@@ -306,12 +306,10 @@ const createOrder = async (req, res) => {
                 transactionCode,
                 queueNumber: finalQueueNumber, // Save Daily Number if Cash, otherwise null
                 customerName,
-                // Don't use scalar tableId, use relation below
                 orderType: finalOrderType,
                 totalAmount: calculatedTotal + (shippingFee ? parseInt(shippingFee) : 0),
                 note: note || "",
                 deliveryAddress: deliveryAddress || "",
-                shippingZoneId: shippingZoneId ? parseInt(shippingZoneId) : null,
                 shippingFee: shippingFee ? parseInt(shippingFee) : 0,
                 status: initialStatus,
                 paymentMethod: paymentMethod || null,
@@ -334,6 +332,11 @@ const createOrder = async (req, res) => {
             // Connect Store if Valid
             if (storeId) {
                 orderData.store = { connect: { id: parseInt(storeId) } };
+            }
+
+            // Connect ShippingZone if Valid
+            if (shippingZoneId) {
+                orderData.shippingZone = { connect: { id: parseInt(shippingZoneId) } };
             }
 
             const order = await tx.order.create({
