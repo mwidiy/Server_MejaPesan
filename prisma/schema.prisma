@@ -42,6 +42,7 @@ model Store {
   isDineInActive               Boolean      @default(true)
   isTakeawayActive             Boolean      @default(true)
   isDeliveryActive             Boolean      @default(false)
+  isWaOrderNotificationActive  Boolean      @default(false)
   isWaBotActive                Boolean      @default(false)
   isAiEnabled                  Boolean      @default(false)
   isAutoReplyEnabled           Boolean      @default(false)
