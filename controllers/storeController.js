@@ -120,6 +120,28 @@ const updateStore = async (req, res) => {
         const storeIdInt = parseInt(req.storeId);
         if (isNaN(storeIdInt)) return res.status(400).json({ error: 'User tidak memiliki akses Toko' });
 
+        // --- VERIFIKASI WA NOTIFICATION ---
+        // Fitur ini baru bisa aktif kalau nomor WA restoran sudah diisi
+        if (sanitizedData.isWaOrderNotificationActive === true) {
+            let hasWaNumber = false;
+            
+            if (sanitizedData.whatsappNumber !== undefined) {
+                hasWaNumber = sanitizedData.whatsappNumber !== null && sanitizedData.whatsappNumber.trim().length > 0;
+            } else {
+                const existingStore = await prisma.store.findUnique({
+                    where: { id: storeIdInt },
+                    select: { whatsappNumber: true }
+                });
+                if (existingStore && existingStore.whatsappNumber && existingStore.whatsappNumber.trim().length > 0) {
+                    hasWaNumber = true;
+                }
+            }
+
+            if (!hasWaNumber) {
+                return res.status(400).json({ error: 'Gagal mengaktifkan fitur: Nomor WhatsApp restoran belum diisi.' });
+            }
+        }
+
         // Update Store
         const updated = await prisma.store.update({
             where: { id: storeIdInt },
