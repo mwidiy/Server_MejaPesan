@@ -254,6 +254,13 @@
             if (modelSrc) {
                 console.log("Loading Model:", modelSrc);
                 viewer.src = modelSrc;
+                // Jika dalam mode preview admin, nonaktifkan tombol kubus AR agar tidak memicu intent yang error
+                if (params.get('preview') === 'true') {
+                    viewer.removeAttribute('ar');
+                    const style = document.createElement('style');
+                    style.innerHTML = 'model-viewer::part(default-ar-button), [slot="ar-button"], .ar-btn { pointer-events: none !important; opacity: 0.3 !important; display: none !important; }';
+                    document.head.appendChild(style);
+                }
             } else {
                 console.error("No model source provided.");
                 loadError.style.display = 'flex';
