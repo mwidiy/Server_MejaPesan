@@ -84,7 +84,9 @@ const corsOptions = {
       'http://localhost:3001',
       'http://localhost:5173',
       'https://quacxel.my.id',
-      'https://www.quacxel.my.id'
+      'https://www.quacxel.my.id',
+      'https://back.quacxel.my.id',
+      'https://kasir-api.quacxel.my.id'
     ];
 
     if (process.env.LOCAL_DEV_IP) {
@@ -317,8 +319,8 @@ const startServer = () => {
   const runningServer = server.listen(PORT, () => {
     console.log(`✅ Server berjalan di http://localhost:${PORT}`);
     
-    // NEW: Auto-restart WA Bot sessions when server starts
-    whatsappService.restartAllActiveSessions(io);
+    // WA Bot Auto-Restart DISABLED (Fitur dinonaktifkan demi performa & anti-banned)
+    // whatsappService.restartAllActiveSessions(io);
   });
 
   runningServer.on('error', (err) => {
